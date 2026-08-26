@@ -1,51 +1,67 @@
-module.exports.config = {
-  name: "help",
-  version: "1.0.0",
-  hasPermission: 0,
-  credits: "Sinzu",
-  description: "Ipinapakita ang lahat ng available commands.",
-  commandCategory: "general",
-  usages: "[command name]",
-  cooldowns: 5
-};
+module.exports = {
+  config: {
+    name: "help",
+    aliases: ["menu", "commands"],
+    version: "1.0",
+    author: "Sinzu",
+    countDown: 0,
+    role: 0,
+    shortDescription: "Listahan ng mga command",
+    longDescription: "Ipinapakita ang lahat ng available na command o detalye ng isang command.",
+    category: "info",
+    guide: "{pn} [command name]"
+  },
 
-module.exports.run = async function ({ api, event, args }) {
-  const commandList = [
-    "accept", "active-session", "adduser", "ai", "announce", "autoreply",
-    "coins", "help", "hug", "joke", "kick", "lockgcname", "nickall",
-    "pinterest", "quote", "roll", "setname", "shoti", "slap", "slot",
-    "song", "tid", "translate", "unsend", "uptime", "weather", "yt"
-  ];
+  onStart: async function ({ api, event, args, message, commandName, Users }) {
+    const commands = global.client.commands; // Map ng lahat ng loaded commands
+    const prefix = "/";
+    const ownerName = "Sinzu";
 
-  // Kung may binigay na specific na command name (hal. help ai)
-  if (args[0]) {
-    const cmdName = args[0].toLowerCase();
-    if (!commandList.includes(cmdName)) {
-      return api.sendMessage(`❌ Walang command na "${cmdName}".`, event.threadID, event.messageID);
+    // ── /help [command] — detalye ng specific command ──
+    if (args[0]) {
+      const cmdName = args[0].toLowerCase();
+      const cmd = commands.get(cmdName) ||
+        [...commands.values()].find(c => c.config.aliases && c.config.aliases.includes(cmdName));
+
+      if (!cmd) {
+        return message.reply(`❌ Walang command na "${cmdName}".`);
+      }
+
+      const { name, aliases, version, author, shortDescription, longDescription, category, guide } = cmd.config;
+
+      return message.reply(
+        `📖 COMMAND: ${name}\n` +
+        `━━━━━━━━━━━━━━━━\n` +
+        `📝 Desc: ${longDescription || shortDescription || "N/A"}\n` +
+        `📦 Category: ${category || "N/A"}\n` +
+        `🔤 Aliases: ${aliases && aliases.length ? aliases.join(", ") : "Wala"}\n` +
+        `🛠️ Guide: ${(guide || "{pn}").replace(/{pn}/g, prefix + name)}\n` +
+        `🔖 Version: ${version || "1.0"}\n` +
+        `👤 Author: ${author || "Unknown"}`
+      );
     }
-    return api.sendMessage(
-      `📌 Command: ${cmdName}\n` +
-      `Gamitin: /${cmdName}\n` +
-      `Para sa buong listahan, i-type ang "help".`,
-      event.threadID,
-      event.messageID
-    );
+
+    // ── /help — buong listahan ──
+    // sinasala ang mga hidden command kung meron; ayaw magpakita ng duplicates
+    const list = [...commands.values()]
+      .filter(c => !c.config.role || c.config.role === 0 || c.config.role <= 1)
+      .map(c => c.config.name)
+      .sort((a, b) => a.localeCompare(b));
+
+    let msg = `╭─────────────────╮\n`;
+    msg += `   📖 SINZU BOT — HELP MENU\n`;
+    msg += `╰─────────────────╯\n\n`;
+    msg += `👑 Owner: ${ownerName}\n`;
+    msg += `📦 Total Commands: ${list.length}\n\n`;
+    msg += `━━━━━━━━━━━━━━━━\n`;
+
+    list.forEach((name, i) => {
+      msg += `${i + 1}. ${prefix}${name}\n`;
+    });
+
+    msg += `━━━━━━━━━━━━━━━━\n\n`;
+    msg += `Type "${prefix}help [command]" para sa detalye ng specific na command.`;
+
+    return message.reply(msg);
   }
-
-  const prefix = global.config?.PREFIX || "/";
-  let msg = `╭─────────────────╮\n`;
-  msg += `   📖 SINZU BOT — HELP MENU\n`;
-  msg += `╰─────────────────╯\n\n`;
-  msg += `👑 Owner: Sinzu\n`;
-  msg += `📦 Total Commands: ${commandList.length}\n\n`;
-  msg += `━━━━━━━━━━━━━━━━\n`;
-
-  commandList.forEach((cmd, i) => {
-    msg += `${i + 1}. ${prefix}${cmd}\n`;
-  });
-
-  msg += `━━━━━━━━━━━━━━━━\n`;
-  msg += `\nType "${prefix}help [command]" para sa detalye ng specific na command.`;
-
-  return api.sendMessage(msg, event.threadID, event.messageID);
 };
