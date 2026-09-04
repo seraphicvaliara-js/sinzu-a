@@ -15,6 +15,11 @@ const Utils = new Object({
   account: new Map(),
   cooldowns: new Map(),
 });
+
+// ==== BAGONG: I-track ang reconnect attempts kada userid, para may exponential backoff ====
+const reconnectAttempts = new Map();
+const MAX_RECONNECT_DELAY_MS = 60000; // 1 minute max delay sa pagitan ng retries
+
 fs.readdirSync(script).forEach((file) => {
   const scripts = path.join(script, file);
   const stats = fs.statSync(scripts);
@@ -130,6 +135,12 @@ routes.forEach(route => {
     res.sendFile(path.join(__dirname, 'public', route.file));
   });
 });
+
+// ==== BAGONG: /ping endpoint para sa UptimeRobot o kahit anong keep-alive monitor ====
+app.get('/ping', (req, res) => {
+  res.status(200).send('Alive po!');
+});
+
 app.get('/info', (req, res) => {
   const data = Array.from(Utils.account.values()).map(account => ({
     name: account.name,
@@ -183,7 +194,11 @@ app.post('/login', async (req, res) => {
         });
       } else {
         try {
-          await accountLogin(state, commands, prefix, [admin]);
+          // BINAGO: hindi na basta i-wrap sa [admin] — kung array na, gamitin na direkta,
+          // kung hindi, saka lang i-wrap. Iniiwasan ang nested array bug na sumisira sa
+          // .includes() check sa ibaba pagdating ng admin permission checks.
+          const normalizedAdmin = Array.isArray(admin) ? admin : (admin ? [admin] : []);
+          await accountLogin(state, commands, prefix, normalizedAdmin);
           res.status(200).json({
             success: true,
             message: 'Authentication process completed successfully; login achieved.'
@@ -209,12 +224,26 @@ app.post('/login', async (req, res) => {
     });
   }
 });
-app.listen(3000, () => {
-  console.log(`Server is running at http://localhost:5000`);
+
+// BINAGO: tinama ang port mismatch — dating naka-listen sa 3000 pero ang log message
+// ay nagsasabing 5000. Gumamit din ng process.env.PORT para compatible sa mga host
+// (Render, atbp.) na nagbibigay ng sariling PORT env variable.
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running at http://localhost:${PORT}`);
 });
+
+// BINAGO: dinagdagan ng uncaughtException handler — dati unhandledRejection lang
+// ang na-cacatch, pero ang mga uncaught synchronous errors ay puwede pa ring
+// magpabagsak sa buong Node process. Ngayon, naka-log na lang ito, hindi na
+// kina-crash ang server.
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Promise Rejection:', reason);
 });
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception (hindi na papatayin ang process):', error);
+});
+
 async function accountLogin(state, enableCommands = [], prefix, admin = []) {
   return new Promise((resolve, reject) => {
     login({
@@ -273,8 +302,15 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
           if (error) {
             if (error === 'Connection closed.') {
               console.error(`Error during API listen: ${error}`, userid);
+              // BINAGO: sa halip na tahimik lang mag-log at hayaang patay na ang
+              // listener, susubukan na ngayon mag-reconnect gamit ang naka-save
+              // na session, may exponential backoff para hindi mag-spam ng
+              // login attempts kung talagang invalid na ang session.
+              attemptReconnect(userid, enableCommands, prefix, admin);
+              return;
             }
-            console.log(error)
+            console.log(error);
+            return;
           }
           let database = fs.existsSync('./data/database.json') ? JSON.parse(fs.readFileSync('./data/database.json', 'utf8')) : createDatabase();
           let data = Array.isArray(database) ? database.find(item => Object.keys(item)[0] === event?.threadID) : {};
@@ -368,16 +404,60 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
               break;
           }
         });
+        // BINAGO: nagtagumpay na kumonekta, i-reset ang reconnect attempt counter
+        reconnectAttempts.delete(userid);
       } catch (error) {
         console.error('Error during API listen, outside of listen', userid);
-        Utils.account.delete(userid);
-        deleteThisUser(userid);
+        // BINAGO: sa halip na agad burahin ang user session (deleteThisUser), subukan
+        // muna mag-reconnect. Tanging kapag paulit-ulit na talagang nabibigo (invalid
+        // na session) saka lang ito permanenteng aalisin — nasa attemptReconnect logic.
+        attemptReconnect(userid, enableCommands, prefix, admin);
         return;
       }
       resolve();
     });
   });
 }
+
+// ==== BAGONG FUNCTION: auto-reconnect na may exponential backoff ====
+// Sa halip na basta sumuko at burahin ang session pagka-disconnect, sinusubukan
+// muna nitong mag-reconnect gamit ang parehong naka-save na appstate. Kada
+// kabiguan, dumodoble ang hintay (1s, 2s, 4s, 8s...) hanggang sa max na 1 minuto,
+// para hindi ito mag-spam ng login requests kung talagang patay na ang session.
+// Pagkatapos ng 10 sunod-sunod na kabiguan, saka lang aalisin ang session bilang
+// invalid (malamang naka-logout na o na-ban ang account sa Facebook mismo).
+function attemptReconnect(userid, enableCommands, prefix, admin) {
+  const attempts = (reconnectAttempts.get(userid) || 0) + 1;
+  reconnectAttempts.set(userid, attempts);
+
+  if (attempts > 10) {
+    console.error(`Sumuko na sa pag-reconnect para kay ${userid} pagkatapos ng ${attempts} tries. Aalisin na ang session.`);
+    Utils.account.delete(userid);
+    deleteThisUser(userid);
+    reconnectAttempts.delete(userid);
+    return;
+  }
+
+  const delay = Math.min(1000 * Math.pow(2, attempts - 1), MAX_RECONNECT_DELAY_MS);
+  console.log(`Susubukan ulit ikonekta si ${userid} sa loob ng ${delay / 1000}s (attempt ${attempts})`);
+
+  setTimeout(async () => {
+    try {
+      const sessionFile = path.join('./data/session', `${userid}.json`);
+      if (!fs.existsSync(sessionFile)) {
+        console.error(`Walang nahanap na session file para kay ${userid}, hindi na maituloy ang reconnect.`);
+        reconnectAttempts.delete(userid);
+        return;
+      }
+      const state = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+      await accountLogin(state, enableCommands, prefix, admin);
+    } catch (error) {
+      console.error(`Nabigo ang reconnect attempt para kay ${userid}:`, error.message || error);
+      attemptReconnect(userid, enableCommands, prefix, admin);
+    }
+  }, delay);
+}
+
 async function deleteThisUser(userid) {
   const configFile = './data/history.json';
   let config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
@@ -426,18 +506,29 @@ async function main() {
   const sessionFolder = path.join('./data/session');
   if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
   const adminOfConfig = fs.existsSync('./data') && fs.existsSync('./data/config.json') ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8')) : createConfig();
+
+  // BINAGO: ito dating pumapatay sa buong process (`process.exit(1)`) kada
+  // `restartTime` minutes — ito mismo ang dahilan kung bakit "namamatay" ang
+  // bot kung walang process manager (PM2, atbp.) na nagre-restart agad.
+  // Ngayon, ginagawa lang nito ang layunin ng cache-clearing at pag-save ng
+  // history nang hindi pinapatay ang server — mananatiling buhay at naka-
+  // connect ang bot habang nililinis pa rin ang cache paminsan-minsan.
   cron.schedule(`*/${adminOfConfig[0].masterKey.restartTime} * * * *`, async () => {
-    const history = JSON.parse(fs.readFileSync('./data/history.json', 'utf-8'));
-    history.forEach(user => {
-      (!user || typeof user !== 'object') ? process.exit(1): null;
-      (user.time === undefined || user.time === null || isNaN(user.time)) ? process.exit(1): null;
-      const update = Utils.account.get(user.userid);
-      update ? user.time = update.time : null;
-    });
-    await empty.emptyDir(cacheFile);
-    await fs.writeFileSync('./data/history.json', JSON.stringify(history, null, 2));
-    process.exit(1);
+    try {
+      const history = JSON.parse(fs.readFileSync('./data/history.json', 'utf-8'));
+      history.forEach(user => {
+        if (!user || typeof user !== 'object') return;
+        const update = Utils.account.get(user.userid);
+        if (update) user.time = update.time;
+      });
+      await empty.emptyDir(cacheFile);
+      await fs.writeFileSync('./data/history.json', JSON.stringify(history, null, 2));
+      console.log('Cache cleared at history na-save — walang na-restart na process.');
+    } catch (error) {
+      console.error('Error sa scheduled cache cleanup (hindi papatayin ang process):', error);
+    }
   });
+
   try {
     for (const file of fs.readdirSync(sessionFolder)) {
       const filePath = path.join(sessionFolder, file);
@@ -449,7 +540,7 @@ async function main() {
           blacklist
         } = config.find(item => item.userid === path.parse(file).name) || {};
         const state = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        if (enableCommands) await accountLogin(state, enableCommands, prefix, admin, blacklist);
+        if (enableCommands) await accountLogin(state, enableCommands, prefix, admin);
       } catch (error) {
         deleteThisUser(path.parse(file).name);
       }
@@ -510,4 +601,3 @@ async function createDatabase() {
   return database;
 }
 main()
-              
