@@ -3,19 +3,15 @@ const path = require("path");
 
 module.exports.config = {
   name: "bot",
-  version: "2.0.0",
-  hasPermission: 0,
+  version: "2.1.0",
+  hasPermission: 2, // Set to 2 para dashboard/config admins lang ang pwedeng gumamit
   credits: "you",
-  description: "Admin-only: /bot on — bubuksan ang bot dito at mag-aauto-reply na ng generic lines sa lahat ng messages. /bot off — ihihinto ang auto-reply at ia-ignore ang lahat ng hindi bot admin sa thread na 'yon.",
+  description: "Admin-only: /bot on — bubuksan ang bot at mag-aauto-reply. /bot off — ihihinto ang auto-reply at ia-ignore ang non-admins.",
   commandCategory: "admin",
   usages: "[on/off]",
   cooldowns: 3,
 };
 
-// Persistent storage — naka-save sa JSON file, kaya hindi mawawala kahit
-// mag-restart ang bot.
-//   botOffThreads      -> kung nandito ang threadID, naka-OFF/ignore mode.
-//   botAutoReplyThreads -> kung nandito ang threadID, active ang auto-reply.
 const OFF_DATA_FILE = path.join(__dirname, "bot_data.json");
 const AUTOREPLY_DATA_FILE = path.join(__dirname, "bot_autoreply_data.json");
 
@@ -42,25 +38,42 @@ function saveSet(file, set) {
 let botOffThreads = loadSet(OFF_DATA_FILE);
 let botAutoReplyThreads = loadSet(AUTOREPLY_DATA_FILE);
 
-// BAGONG: inilalagay sa `global` para magamit ito ng dispatcher sa auto.js
-// (yung pangunahing message handler) — dun mismo ichecheck kung naka-OFF
-// ang bot sa isang thread bago pa man patakbuhin ang ibang commands o
-// handleEvent ng ibang scripts (roast, gclock, atbp.).
 global.botOffThreads = botOffThreads;
 
-// Generic auto-reply lines — hindi roast, simpleng katulad ng presence
-// acknowledgment lang ng bot. Puwede mong palitan/dagdagan ito.
+// Pinalawak na listahan kasama ang mga bagong dagdag mo
 const genericReplies = [
-  "ops",
-  "mabigat kapa sa balyena bugok",
-  "opsie kinantot ko nanay mo naka 69 posision",
-  "mag meta ka na kung gusto mo maka takas sakin tanga",
-  "ako greatest trauma mo boboka para ma talo mo ako dapat naka droga ka",
-  "shupaen mo dick ko hold on",
-  "sabeko sayo wag kang tatakbo baka pumayat ka",
-  "sabeko sayo shuk gng onyaface bitch",
-  "idol ako ng idol mo boboka, hindi mo ako mapapatumba kahit mag kampe pa kayong lahat",
-  "wag kang maaning hindi ako tinatablan ng silent mode bobo!",
+  "EH KONG PILAYAN KITA NGAYON MAY MAGAGAWA KA BA ASK LANG BAWAL MAGALIT HA",
+  "PAG KINOTONGAN KITA JAN MAMEMEET UP MO SI SAN PEDRO",
+  "BASAGAN KO NANG BOTE YANG ULO MONG BABUY KA",
+  "EH KONG SIPAEN KUYANG NOO MONG MALAPAD",
+  "PAG INUPPERCUT KITA JAN MAKIKITA MO SI KAMATAYAN",
+  "EH KONG ILUBOG KITA SA LUPA RIGHT NOW KAKAYANIN MOBA",
+  "EH YONG PAPA MONG BALDADO PAG TINADYAKAN KO YAN TAMO SA KABAONG BAGSAK NYAN",
+  "ENOMEN MO NGA MODTAKELS KO HOY ASO",
+  "SA SUBRANG HABA NANG BABA MO PWEDE NA GAWIN PANG SELF DEFENSE EH",
+  "PAG SINUNTOK KO MUKA MO MAGIGING KAMUKA MO SI BOSS ATAN",
+  "ANOMPAKE KO SA OPINYON MO HA",
+  "PAG SINIPA KO BACKBONE MO MAKAKATULOG KA",
+  "HALOS KATIMBANG MONA YONG TATLONG ELEPANTE SA SUBRANG BIGAT MO EH",
+  "RAMDAM KO KABADO KA AHH SUBRA TABA KASI EHH",
+  "EH KAHIT ISANG DUSENANG BABOY MAS MATABA KA PA RIN E",
+  "KAHIT ISPAMMIN MOKO RIGHT NOW HINDI AKO MAWAWALA SKL LANG NMN",
+  "WAGMUKO BINIBIRO JAN BAKA LECHONIN KITANG YUBABSKIE KA",
+  "EH PATI TIMBANGAN MASISIRA SA SUBRANG TABA MONG HAUPKA",
+  "PATI YELO SA FREEZER FINOODTRIP MONG YUBAB KA AHH",
+  "EH KONG PATABAAN LANG YONG LABANAN MATAGAL KA NA PANALO",
+  "WAGMUKO DAGANAN HUY BALYENA YARN",
+  "PWEDE MATULOG BASTA MAGTYPE KA AHAHAHA",
+  "AYT PAGOD NA PAGOD KA NA DOG AH EH KASO DI AKO MAWAWALA",
+  "NAGHIHINGALO KA NA AHH MAG NEBULIZER KA JAN PERO BAWAL MAWALA HA",
+  "KANTUTEN KUYANG MAMA MO SA HARAP MO GAGUKA",
+  "EH KONG SAKSAKIN KITA NANG ICE PICK JAN MAY MAGAGAWA KABA",
+  "PAG TINADYAKAN KO SPINAL CORD MO MAGIGISING KA TALAGA",
+  "GILITAN KITA NANG LEEG JAN ASUKA HAHAHAHAHA",
+  "EH KONG IPOKPOK KOTONG MARTILYO SA ULO MO RIGHT NOW",
+  "PAG SINIPA KO LEEG MO JAN AHAHAHAHAHA",
+  "BAKA HINGALIN KA JAN AH DIBDIBAN KITA HAHAHAHAHA",
+  "DOG KAHET MAG LUMPASAY KA SA HARAP KO DI KA MAKAKATAKAS"
 ];
 
 const lastReplyByThread = new Map();
@@ -80,9 +93,9 @@ module.exports.run = async function ({ api, event, args }) {
   const option = args[0] ? args[0].toLowerCase() : null;
   const prefix = global.config?.PREFIX || "/";
 
-  // Admin-only — IDs galing sa global.config.adminBot (nilalagay sa dashboard/config)
-  const adminBot = global.config?.adminBot || [];
-  if (!adminBot.includes(senderID)) {
+  const adminBot = global.config?.ADMINBOT || global.config?.adminBot || global.config?.NDH || [];
+  
+  if (this.config.hasPermission !== 2 && !adminBot.includes(senderID)) {
     return api.sendMessage(
       "🚫 Admin-only command. Only bot admins set in the dashboard can use this.",
       threadID,
@@ -91,7 +104,6 @@ module.exports.run = async function ({ api, event, args }) {
   }
 
   if (option === "off") {
-    // Itigil ang auto-reply AT i-enable ulit ang ignore-non-admin gate.
     botAutoReplyThreads.delete(threadID);
     saveSet(AUTOREPLY_DATA_FILE, botAutoReplyThreads);
 
@@ -100,14 +112,13 @@ module.exports.run = async function ({ api, event, args }) {
     saveSet(OFF_DATA_FILE, botOffThreads);
 
     return api.sendMessage(
-      "🔴 Naka-OFF na ang bot dito. Hindi na mag-aauto-reply, at ia-ignore ang lahat ng messages/commands mula sa hindi bot admin.",
+      "🔴 Naka-OFF na ang bot dito. Hindi na mag-aauto-reply, at ia-ignore ang lahat ng messages mula sa hindi bot admin.",
       threadID,
       messageID
     );
   }
 
   if (option === "on") {
-    // Alisin sa ignore list AT simulan ang auto-reply.
     botOffThreads.delete(threadID);
     global.botOffThreads = botOffThreads;
     saveSet(OFF_DATA_FILE, botOffThreads);
@@ -129,11 +140,6 @@ module.exports.run = async function ({ api, event, args }) {
   );
 };
 
-// sendMessage isn't awaited here — bawat message ay may sariling reply na
-// pinapadala nang independent, kahit sabay-sabay maraming nagmemessage.
-//
-// May random na "typing delay" (3–8 seconds) bago magsend, para hindi
-// mukhang instant/bot ang pattern.
 module.exports.handleEvent = function ({ api, event }) {
   const { threadID, senderID, body } = event;
 
@@ -142,14 +148,12 @@ module.exports.handleEvent = function ({ api, event }) {
   if (senderID === api.getCurrentUserID()) return;
 
   const randomReply = getRandomGenericReply(threadID);
-  const humanDelay = 3000 + Math.floor(Math.random() * 5000); // 3–8 segundo
+  const humanDelay = 2000 + Math.floor(Math.random() * 3000);
 
   setTimeout(() => {
     try {
       api.sendTypingIndicator?.(threadID);
-    } catch (err) {
-      // Hindi lahat ng fork/library may ganitong method — okay lang kung wala.
-    }
+    } catch (err) {}
 
     api.sendMessage(randomReply, threadID);
   }, humanDelay);
