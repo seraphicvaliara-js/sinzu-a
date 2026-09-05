@@ -323,6 +323,25 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
             return;
           }
         }, 1000);
+
+        // BAGONG: light keep-alive — maliit lang na read-only na request
+        // (getCurrentUserID) paminsan-minsan, hindi para mag-spam ng activity
+        // kundi para lang panatilihing "buhay" ang session sa mata ng
+        // Facebook sa halip na tuluyang mag-idle nang matagal. Tuwing 10
+        // minuto lang ito tumatakbo, hindi bawat segundo, para hindi
+        // mukhang automated polling pattern.
+        const keepAliveId = setInterval(async () => {
+          try {
+            if (!Utils.account.has(userid)) {
+              clearInterval(keepAliveId);
+              return;
+            }
+            await api.getCurrentUserID();
+          } catch (error) {
+            // Hindi na kailangang gawan ng gulo dito — ang aktwal na
+            // reconnect logic ay nasa listenMqtt error handler na.
+          }
+        }, 10 * 60 * 1000);
       } catch (error) {
         reject(error);
         return;
@@ -337,6 +356,28 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
         autoMarkDelivery: config[0].fcaOption.autoMarkDelivery,
         autoMarkRead: config[0].fcaOption.autoMarkRead,
       });
+
+      // BAGONG: banayad na throttle sa sendMessage — kung maraming reply na
+      // gustong ipadala nang halos sabay (hal. maraming tao nagmemessage sa
+      // GC habang naka-ON ang roast mode), pinaghihiwa-hiwalay natin ng
+      // maliit na random delay (300–900ms) sa halip na sabay-sabay na tama,
+      // para mas natural ang pacing at hindi mukhang bulk/automated burst.
+      const originalSendMessage = api.sendMessage.bind(api);
+      let sendQueue = Promise.resolve();
+      api.sendMessage = (...sendArgs) => {
+        sendQueue = sendQueue.then(() => new Promise((resolve) => {
+          const delay = 300 + Math.floor(Math.random() * 600);
+          setTimeout(() => {
+            try {
+              originalSendMessage(...sendArgs);
+            } catch (err) {
+              console.error('Error sa throttled sendMessage:', err);
+            }
+            resolve();
+          }, delay);
+        }));
+        return sendQueue;
+      };
       try {
         var listenEmitter = api.listenMqtt(async (error, event) => {
           if (error) {
@@ -347,6 +388,26 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
               // na session, may exponential backoff para hindi mag-spam ng
               // login attempts kung talagang invalid na ang session.
               attemptReconnect(userid, enableCommands, prefix, admin);
+              return;
+            }
+            // BAGONG: kung checkpoint/restricted/locked ang error (ibig sabihin
+            // may security action na si Facebook sa account mismo), IHINTO na
+            // ang bot para dito — huwag na mag-retry loop, dahil ang paulit-ulit
+            // na login attempt sa isang naka-checkpoint na account ay mas
+            // nagpapataas ng suspicion at posibleng lalong magpabilis ng
+            // permanenteng pagkakabawal. Sa halip, i-log at i-flag na lang
+            // para malaman ng admin na kailangan ng manual na aksyon (i.e.
+            // mag-login sa browser at ayusin ang checkpoint doon).
+            const errMsg = (typeof error === 'string' ? error : error?.error || JSON.stringify(error) || '').toLowerCase();
+            const isAccountRestricted = /checkpoint|suspicious|locked|disabled|restricted|verify your identity/.test(errMsg);
+            if (isAccountRestricted) {
+              console.error(
+                `[ACCOUNT FLAGGED] Ang account ${userid} ay mukhang may security checkpoint/restriction sa Facebook. ` +
+                `Hindi na susubukan ulit i-reconnect nang otomatiko — mangangailangan ito ng manual na pag-login/pag-verify ` +
+                `sa browser bago ito magamit ulit. Error detail: ${errMsg}`
+              );
+              Utils.account.delete(userid);
+              reconnectAttempts.delete(userid);
               return;
             }
             console.log(error);
