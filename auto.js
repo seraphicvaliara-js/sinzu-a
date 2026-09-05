@@ -171,50 +171,65 @@ app.get('/commands', (req, res) => {
     aliases
   }, null, 2)));
 });
+
+// BINAGO: dinagdagan ng "force" option — kung may existing session na at
+// force:true ang ipinasa, i-clear muna ang lumang session bago mag-login
+// ulit, sa halip na basta i-block palagi. Ito ang nag-aayos sa "Active
+// user session detected" na palaging lumalabas kahit gusto mo lang
+// i-reactivate/i-refresh ang parehong account.
 app.post('/login', async (req, res) => {
   const {
     state,
     commands,
     prefix,
-    admin
+    admin,
+    force
   } = req.body;
   try {
     if (!state) {
       throw new Error('Missing app state data');
     }
     const cUser = state.find(item => item.key === 'c_user');
-    if (cUser) {
-      const existingUser = Utils.account.get(cUser.value);
-      if (existingUser) {
-        console.log(`User ${cUser.value} is already logged in`);
-        return res.status(400).json({
-          error: false,
-          message: "Active user session detected; already logged in",
-          user: existingUser
-        });
-      } else {
-        try {
-          // BINAGO: hindi na basta i-wrap sa [admin] — kung array na, gamitin na direkta,
-          // kung hindi, saka lang i-wrap. Iniiwasan ang nested array bug na sumisira sa
-          // .includes() check sa ibaba pagdating ng admin permission checks.
-          const normalizedAdmin = Array.isArray(admin) ? admin : (admin ? [admin] : []);
-          await accountLogin(state, commands, prefix, normalizedAdmin);
-          res.status(200).json({
-            success: true,
-            message: 'Authentication process completed successfully; login achieved.'
-          });
-        } catch (error) {
-          console.error(error);
-          res.status(400).json({
-            error: true,
-            message: error.message
-          });
-        }
-      }
-    } else {
+    if (!cUser) {
       return res.status(400).json({
         error: true,
         message: "There's an issue with the appstate data; it's invalid."
+      });
+    }
+
+    const existingUser = Utils.account.get(cUser.value);
+
+    if (existingUser && !force) {
+      console.log(`User ${cUser.value} is already logged in`);
+      return res.status(400).json({
+        error: false,
+        message: "Active user session detected; already logged in. Mag-'/logout' muna kung gusto mong i-reset, o magpadala ng 'force: true' sa request na 'to para i-refresh.",
+        user: existingUser
+      });
+    }
+
+    // Kung may existing session at pinilit (force) i-refresh, alisin muna
+    // ang luma bago mag-login ulit gamit ang bagong state.
+    if (existingUser && force) {
+      Utils.account.delete(cUser.value);
+      await deleteThisUser(cUser.value);
+    }
+
+    try {
+      // BINAGO: hindi na basta i-wrap sa [admin] — kung array na, gamitin na direkta,
+      // kung hindi, saka lang i-wrap. Iniiwasan ang nested array bug na sumisira sa
+      // .includes() check sa ibaba pagdating ng admin permission checks.
+      const normalizedAdmin = Array.isArray(admin) ? admin : (admin ? [admin] : []);
+      await accountLogin(state, commands, prefix, normalizedAdmin);
+      res.status(200).json({
+        success: true,
+        message: 'Authentication process completed successfully; login achieved.'
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(400).json({
+        error: true,
+        message: error.message
       });
     }
   } catch (error) {
@@ -223,6 +238,31 @@ app.post('/login', async (req, res) => {
       message: "There's an issue with the appstate data; it's invalid."
     });
   }
+});
+
+// ==== BAGONG: /logout endpoint — para maalis ang stuck/existing session ====
+// Gamitin ito bago mag-login ulit kung gusto mong palitan o i-reset ang
+// session ng isang account nang hindi kailangang mag-force sa /login.
+app.post('/logout', async (req, res) => {
+  const { userid } = req.body;
+  if (!userid) {
+    return res.status(400).json({
+      error: true,
+      message: "Missing userid"
+    });
+  }
+  if (!Utils.account.has(userid)) {
+    return res.status(400).json({
+      error: true,
+      message: "Walang active session ang userid na 'to."
+    });
+  }
+  Utils.account.delete(userid);
+  await deleteThisUser(userid);
+  res.status(200).json({
+    success: true,
+    message: "Na-logout na. Pwede nang mag-login ulit."
+  });
 });
 
 // BINAGO: tinama ang port mismatch — dating naka-listen sa 3000 pero ang log message
