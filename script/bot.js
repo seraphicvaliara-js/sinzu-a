@@ -3,13 +3,13 @@ const path = require("path");
 
 module.exports.config = {
   name: "bot",
-  version: "2.1.0",
-  hasPermission: 2, // Set to 2 para dashboard/config admins lang ang pwedeng gumamit
+  version: "2.2.0",
+  hasPermission: 2,
   credits: "you",
   description: "Admin-only: /bot on — bubuksan ang bot at mag-aauto-reply. /bot off — ihihinto ang auto-reply at ia-ignore ang non-admins.",
   commandCategory: "admin",
   usages: "[on/off]",
-  cooldowns: 3,
+  cooldowns: 0, // Inalis ang cooldown para magamit agad nang walang hinto
 };
 
 const OFF_DATA_FILE = path.join(__dirname, "bot_data.json");
@@ -40,7 +40,6 @@ let botAutoReplyThreads = loadSet(AUTOREPLY_DATA_FILE);
 
 global.botOffThreads = botOffThreads;
 
-// Pinalawak na listahan kasama ang mga bagong dagdag mo
 const genericReplies = [
   "EH KONG PILAYAN KITA NGAYON MAY MAGAGAWA KA BA ASK LANG BAWAL MAGALIT HA",
   "PAG KINOTONGAN KITA JAN MAMEMEET UP MO SI SAN PEDRO",
@@ -148,7 +147,9 @@ module.exports.handleEvent = function ({ api, event }) {
   if (senderID === api.getCurrentUserID()) return;
 
   const randomReply = getRandomGenericReply(threadID);
-  const humanDelay = 2000 + Math.floor(Math.random() * 3000);
+  
+  // Safe micro-delay (800ms to 1500ms) - Mabilis sumagot pero panangga sa FB spam detector
+  const safeFastDelay = 800 + Math.floor(Math.random() * 700);
 
   setTimeout(() => {
     try {
@@ -156,5 +157,5 @@ module.exports.handleEvent = function ({ api, event }) {
     } catch (err) {}
 
     api.sendMessage(randomReply, threadID);
-  }, humanDelay);
+  }, safeFastDelay);
 };
