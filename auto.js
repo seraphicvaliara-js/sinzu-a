@@ -13,6 +13,14 @@ const config = fs.existsSync('./data') && fs.existsSync('./data/config.json')
   ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8'))
   : createConfig();
 
+// BAGONG: i-bridge ang config papunta sa `global.config` — ginagamit ito
+// ng mga command scripts (gclock.js, roast.js, bot.js) para sa admin check
+// (`global.config.adminBot`) at prefix reference. Nang walang 'to, palaging
+// mag-e-error/mag-block ang mga admin-only command dahil laging undefined
+// ang nakikita nilang adminBot list.
+global.config = config[0];
+global.config.adminBot = config[0].masterKey.admin;
+
 const dev = fs.existsSync('./dev.json') ? JSON.parse(fs.readFileSync('./dev.json', 'utf8')) : [];
 
 const Utils = new Object({
@@ -22,16 +30,14 @@ const Utils = new Object({
   cooldowns: new Map(),
 });
 
-// I-track ang reconnect attempts kada userid, para may exponential backoff
 const reconnectAttempts = new Map();
-const MAX_RECONNECT_DELAY_MS = 60000; // 1 minute max delay sa pagitan ng retries
+// (Ang MAX_RECONNECT_DELAY_MS ay pinalitan na ng RECONNECT_BACKOFF_STEPS_MS
+// sa ibaba — tingnan ang attemptReconnect().)
 
-// Itala kung kailan sinimulan ang server, para may basehan ang uptime counter
 const SERVER_START_TIME = Date.now();
 
-// ==== URL monitor/pinger — "self-uptime" para sa ibang links ====
 const MONITOR_FILE = path.join(__dirname, 'data', 'monitored_urls.json');
-const PING_INTERVAL_MS = 5 * 60 * 1000; // tuwing 5 minuto
+const PING_INTERVAL_MS = 5 * 60 * 1000;
 
 function loadMonitoredUrls() {
   try {
@@ -82,7 +88,6 @@ async function pingAllMonitoredUrls() {
 pingAllMonitoredUrls();
 setInterval(pingAllMonitoredUrls, PING_INTERVAL_MS);
 
-// ==== Command/handleEvent loader ====
 if (fs.existsSync(script)) {
   fs.readdirSync(script).forEach((file) => {
     const scripts = path.join(script, file);
@@ -146,8 +151,6 @@ routes.forEach(route => {
     res.sendFile(path.join(__dirname, 'public', route.file));
   });
 });
-
-// ==== Health / monitor endpoints ====
 
 app.get('/ping', (req, res) => {
   res.status(200).send('Alive po!');
@@ -231,15 +234,6 @@ app.get('/uptime', (req, res) => {
   });
 });
 
-// ==== Login ====
-//
-// BINAGO (2026): tinanggal na ang "Active user session detected; already
-// logged in" na naka-block dati. Ngayon, sa TUWING magpapadala ka ng
-// appstate sa /login, agad itong lo-login — kahit may existing session na
-// para sa parehong account. Kung may dati nang session ang account na 'yon,
-// awtomatiko itong ia-alis muna (kasama yung dating listener/session file)
-// bago ipasok yung bagong appstate. Walang na-block na request, walang
-// kailangang i-force manually — diretso lang talaga itong nagre-refresh.
 app.post('/login', async (req, res) => {
   const { state, commands, prefix, admin } = req.body;
 
@@ -255,9 +249,6 @@ app.post('/login', async (req, res) => {
       });
     }
 
-    // Kung may existing session/listener na para dito, i-clean muna bago
-    // mag-login gamit ang bagong appstate — para laging "fresh" ang login
-    // sa bawat pagpasok ng appstate, kahit paulit-ulit na parehong account.
     await cleanupExistingSession(cUser.value);
 
     const normalizedAdmin = Array.isArray(admin) ? admin : (admin ? [admin] : []);
@@ -297,7 +288,6 @@ const server = app.listen(PORT, () => {
   console.log(`Server is running at http://localhost:${PORT}`);
 });
 
-// ==== Global error safety net ====
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Promise Rejection:', reason);
 });
@@ -305,31 +295,41 @@ process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception (hindi na papatayin ang process):', error);
 });
 
-// Graceful shutdown — para sa modern hosting (Render/Railway) na nagpapadala
-// ng SIGTERM bago i-restart/i-redeploy ang service. Hinahayaan tapusin ng
-// server ang kasalukuyang requests bago talagang mamatay.
 function gracefulShutdown(signal) {
   console.log(`Natanggap ang ${signal}, magsasara nang maayos...`);
   server.close(() => {
     console.log('HTTP server closed.');
     process.exit(0);
   });
-  // Kung hindi nagsara sa loob ng 10s, sapilitan nang lumabas
   setTimeout(() => process.exit(1), 10000).unref();
 }
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // ==== Core login logic ====
+//
+// MAHALAGANG PAALALA sa dalawang magkaibang flow dito:
+//
+// 1. MANUAL na pag-login (via /login sa dashboard) — SADYANG laging
+//    nagcli-cleanup muna bago mag-login (tingnan ang app.post('/login')
+//    sa taas). Ito ay intentional: kapag ikaw mismo ang naglagay ng
+//    appstate sa dashboard, ibig sabihin gusto mong palitan/i-refresh
+//    talaga ang session, kaya diretso itong nagre-replace.
+//
+// 2. OTOMATIKONG reconnect (dahil sa "Connection closed" o ibang
+//    connection error) — HINDI agad nagcli-cleanup. Ang attemptReconnect()
+//    sa ibaba ay ginagamit muna ulit ang parehong session file, may
+//    backoff delay, at 10 beses lang susubukan bago ito talaga i-cleanup
+//    bilang invalid. Ito ang tamang behavior: existing session -> subukan
+//    munang gamitin/i-reconnect -> kapag paulit-ulit na nabigo, saka lang
+//    ituring na invalid at burahin.
 
 async function cleanupExistingSession(userid) {
   const account = Utils.account.get(userid);
   if (account?.stopListening) {
     try {
       account.stopListening();
-    } catch (err) {
-      // Hindi kritikal kung nabigo — ipagpapatuloy pa rin ang cleanup
-    }
+    } catch (err) {}
   }
   if (account?.keepAliveId) clearInterval(account.keepAliveId);
   if (account?.intervalId) clearInterval(account.intervalId);
@@ -371,9 +371,6 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
           Utils.account.set(userid, { ...account, time: account.time + 1 });
         }, 1000);
 
-        // Light keep-alive — maliit na read-only request paminsan-minsan
-        // (tuwing 10 minuto) para hindi mag-idle-timeout ang session,
-        // hindi para mag-spam ng activity.
         const keepAliveId = setInterval(async () => {
           try {
             if (!Utils.account.has(userid)) {
@@ -381,15 +378,13 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
               return;
             }
             await api.getCurrentUserID();
-          } catch (err) {
-            // Ang aktwal na reconnect logic ay nasa listenMqtt error handler.
-          }
+          } catch (err) {}
         }, 10 * 60 * 1000);
 
         Utils.account.set(userid, {
           name, profileUrl, thumbSrc, time,
           intervalId, keepAliveId,
-          stopListening: null, // ise-set pagkatapos ma-start ang listener
+          stopListening: null,
         });
       } catch (error) {
         reject(error);
@@ -401,15 +396,18 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
         logLevel: config[0].fcaOption.logLevel,
         updatePresence: config[0].fcaOption.updatePresence,
         selfListen: config[0].fcaOption.selfListen,
-        forceLogin: config[0].fcaOption.forceLogin,
+        // BINAGO: pinilit na `false` ang forceLogin dito, anuman ang laman ng
+        // data/config.json — ang forceLogin:true ang nagpapasabak sa fresh
+        // login flow kahit valid pa ang existing session, na isa sa mga
+        // dahilan ng hindi-kailangang re-login/session churn. Kung gusto mong
+        // baguhin ulit, i-edit ang linyang ito, hindi ang config.json, dahil
+        // dinidiin ito rito.
+        forceLogin: false,
         online: config[0].fcaOption.online,
         autoMarkDelivery: config[0].fcaOption.autoMarkDelivery,
         autoMarkRead: config[0].fcaOption.autoMarkRead,
       });
 
-      // Banayad na throttle sa sendMessage — pinaghihiwa-hiwalay ng random
-      // 300–900ms delay ang sunud-sunod na sends, para mas natural ang
-      // pacing sa halip na sabay-sabay na burst.
       const originalSendMessage = api.sendMessage.bind(api);
       let sendQueue = Promise.resolve();
       api.sendMessage = (...sendArgs) => {
@@ -436,11 +434,8 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
               return;
             }
 
-            // Kung checkpoint/restricted/locked ang error, IHINTO ang bot
-            // dito — huwag mag-retry loop, para hindi lalong magpataas ng
-            // suspicion sa isang naka-checkpoint na account.
             const errMsg = (typeof error === 'string' ? error : error?.error || JSON.stringify(error) || '').toLowerCase();
-            const isAccountRestricted = /checkpoint|suspicious|locked|disabled|restricted|verify your identity/.test(errMsg);
+            const isAccountRestricted = /checkpoint|suspicious|locked|disabled|restricted|verify your identity|revoked|session expired|invalid session|not logged in/.test(errMsg);
             if (isAccountRestricted) {
               console.error(
                 `[ACCOUNT FLAGGED] Ang account ${userid} ay mukhang may security checkpoint/restriction sa Facebook. ` +
@@ -461,6 +456,15 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
           let data = Array.isArray(database) ? database.find(item => Object.keys(item)[0] === event?.threadID) : {};
           let adminIDS = data ? database : await createThread(event.threadID, api);
           let blacklist = (JSON.parse(fs.readFileSync('./data/history.json', 'utf-8')).find(b => b.userid === userid) || {}).blacklist || [];
+          // BAGONG: bot on/off check — kung naka-OFF ang bot sa thread na 'to
+          // (via /bot off command), ia-ignore ang LAHAT ng commands/replies
+          // mula sa hindi bot admin. Bot admins pa rin ang makakagamit dito,
+          // kasama na ang pag-on ulit gamit ang 'bot on'.
+          const isBotOffHere = global.botOffThreads && global.botOffThreads.has(event.threadID);
+          if (isBotOffHere && !(global.config?.adminBot || []).includes(event.senderID)) {
+            return;
+          }
+
           let hasPrefix = (event.body && aliases((event.body || '')?.trim().toLowerCase().split(/ +/).shift())?.hasPrefix == false) ? '' : prefix;
           let [command, ...args] = ((event.body || '').trim().toLowerCase().startsWith((hasPrefix || '').toLowerCase())
             ? (event.body || '').trim().substring((hasPrefix || '').length).trim().split(/\s+/).map(arg => arg.trim())
@@ -518,11 +522,23 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
             return;
           }
 
+          // BINAGO: bawat handleEvent (roast.js, gclock.js, bot.js, atbp.)
+          // ay naka-try/catch na ngayon nang individually. Dati, kung
+          // mag-throw ang isa sa mga 'to (hal. dahil sa unexpected na data
+          // shape), pwede itong maging unhandled error na umaakyat papunta
+          // sa listenMqtt callback mismo — at kahit na naka-log lang ito
+          // (hindi crash ang process dahil sa unhandledRejection handler),
+          // maaari pa rin nitong ma-istorbo ang normal na flow ng event
+          // processing para sa parehong event. Isolated na ngayon bawat isa.
           for (const { handleEvent, name } of Utils.handleEvent.values()) {
             if (handleEvent && name && (
               (enableCommands[1]?.handleEvent || []).includes(name) || (enableCommands[0]?.commands || []).includes(name)
             )) {
-              handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
+              try {
+                handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
+              } catch (handleEventError) {
+                console.error(`[handleEvent:${name}] Error (naka-isolate, hindi ito magpapabagsak ng bot):`, handleEventError?.message || handleEventError);
+              }
             }
           }
 
@@ -532,16 +548,37 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
             case 'message_unsend':
             case 'message_reaction':
               if (enableCommands[0]?.commands?.includes(aliases(command?.toLowerCase())?.name)) {
-                await ((aliases(command?.toLowerCase())?.run || (() => {}))({
-                  api, event, args, enableCommands, admin, prefix, blacklist, Utils,
-                }));
+                // BINAGO: naka-try/catch na rin ang command execution mismo.
+                // Kung mag-throw ang isang command (hal. war.js o kahit
+                // anong bagong command sa hinaharap), hindi na ito magiging
+                // dahilan ng "Connection closed"-like na epekto o
+                // pagkaputol ng listener/session — naka-isolate na ito sa
+                // command na 'yon lang, at ipagpapatuloy pa rin ang bot
+                // nang normal para sa lahat ng ibang thread/command.
+                try {
+                  await ((aliases(command?.toLowerCase())?.run || (() => {}))({
+                    api, event, args, enableCommands, admin, prefix, blacklist, Utils,
+                  }));
+                } catch (commandError) {
+                  console.error(`[command:${command}] Error (naka-isolate, hindi ito magpapabagsak ng bot):`, commandError?.message || commandError);
+                  try {
+                    api.sendMessage(
+                      `⚠️ May error sa '${command}' command. Subukan ulit mamaya.`,
+                      event.threadID,
+                      event.messageID
+                    );
+                  } catch (notifyError) {
+                    // Kung mabigo pa ring magsend ng error notice, i-log
+                    // na lang at huwag nang subukan pa — iniiwasan ang
+                    // recursive na error loop.
+                    console.error(`[command:${command}] Hindi rin naipadala ang error notice:`, notifyError?.message || notifyError);
+                  }
+                }
               }
               break;
           }
         });
 
-        // Naitala ang paraan para itigil ang listener kapag kinailangan
-        // (hal. sa /logout o sa pag-force-login ulit gamit ang bagong appstate).
         const account = Utils.account.get(userid);
         if (account) {
           Utils.account.set(userid, {
@@ -551,9 +588,7 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
                 if (listenEmitter && typeof listenEmitter.stopListening === 'function') {
                   listenEmitter.stopListening();
                 }
-              } catch (err) {
-                // ok lang kung walang stopListening method ang fork mo
-              }
+              } catch (err) {}
             },
           });
         }
@@ -570,8 +605,12 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
   });
 }
 
-// Auto-reconnect na may exponential backoff (1s, 2s, 4s, ... max 60s).
-// Pagkatapos ng 10 sunod-sunod na kabiguan, aalisin bilang invalid.
+// BINAGO: fixed backoff steps (10s -> 30s -> 60s -> 120s, tapos 120s na
+// paulit-ulit) sa halip na exponential doubling. Mas predictable ang
+// pacing na 'to at hindi masyadong mabilis (dating nagsisimula sa 1s lang),
+// na mas ligtas para sa reconnect attempts papunta sa Facebook.
+const RECONNECT_BACKOFF_STEPS_MS = [10000, 30000, 60000, 120000];
+
 function attemptReconnect(userid, enableCommands, prefix, admin) {
   const attempts = (reconnectAttempts.get(userid) || 0) + 1;
   reconnectAttempts.set(userid, attempts);
@@ -582,7 +621,8 @@ function attemptReconnect(userid, enableCommands, prefix, admin) {
     return;
   }
 
-  const delay = Math.min(1000 * Math.pow(2, attempts - 1), MAX_RECONNECT_DELAY_MS);
+  const stepIndex = Math.min(attempts - 1, RECONNECT_BACKOFF_STEPS_MS.length - 1);
+  const delay = RECONNECT_BACKOFF_STEPS_MS[stepIndex];
   console.log(`Susubukan ulit ikonekta si ${userid} sa loob ng ${delay / 1000}s (attempt ${attempts})`);
 
   setTimeout(async () => {
@@ -612,9 +652,7 @@ async function deleteThisUser(userid) {
   fs.writeFileSync(configFile, JSON.stringify(historyData, null, 2));
   try {
     fs.unlinkSync(sessionFile);
-  } catch (error) {
-    // ok lang kung wala nang file
-  }
+  } catch (error) {}
 }
 
 async function addThisUser(userid, enableCommands, state, prefix, admin, blacklist) {
@@ -666,8 +704,6 @@ async function main() {
     ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8'))
     : createConfig();
 
-  // Cache-clearing/history-save cron — hindi na pinapatay ang process,
-  // panatilihing buhay at naka-connect ang bot habang nililinis ang cache.
   cron.schedule(`*/${adminOfConfig[0].masterKey.restartTime} * * * *`, async () => {
     try {
       const history = JSON.parse(fs.readFileSync('./data/history.json', 'utf-8'));
@@ -677,7 +713,6 @@ async function main() {
         if (update) user.time = update.time;
       });
 
-      // I-clear ang cache folder nang manu-mano (walang fs-extra dependency).
       for (const file of fs.readdirSync(cacheFile)) {
         const filePath = path.join(cacheFile, file);
         fs.rmSync(filePath, { recursive: true, force: true });
@@ -716,7 +751,7 @@ function createConfig() {
       restartTime: 15,
     },
     fcaOption: {
-      forceLogin: true,
+      forceLogin: false,
       listenEvents: true,
       logLevel: "silent",
       updatePresence: true,
