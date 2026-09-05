@@ -6,7 +6,7 @@ module.exports.config = {
   version: "4.0.0",
   hasPermission: 0,
   credits: "you",
-  description: "Toggle roast-mode autoreply on/off — random savage one-liner replies to every message sent by a bot admin (others are ignored). Persistent and handles rapid-fire messages independently.",
+  description: "Toggle roast-mode autoreply on/off — random savage one-liner replies (with a human-like delay) to every message sent by a bot admin (others are ignored). Persistent and handles rapid-fire messages independently.",
   commandCategory: "fun",
   usages: "[on/off]",
   cooldowns: 3,
@@ -107,6 +107,11 @@ module.exports.run = async function ({ api, event, args }) {
 // sendMessage isn't awaited here — so incoming events never block each
 // other. Every message gets its own reply fired off independently, even
 // if a bunch of people are messaging the group chat at once.
+//
+// BAGONG: hindi na agad-agad (instant) nagre-reply ang bot. May random na
+// "typing delay" (3–8 seconds) bago magsend, para hindi mukhang parang
+// script/bot ang pattern (instant reply sa bawat message = malinaw na
+// senyales ng automation). Mas natural ang tempo, mas malabong ma-flag.
 module.exports.handleEvent = function ({ api, event }) {
   const { threadID, senderID, body } = event;
 
@@ -120,10 +125,26 @@ module.exports.handleEvent = function ({ api, event }) {
   if (!adminBot.includes(senderID)) return;
 
   const randomReply = getRandomReply(threadID);
+  const humanDelay = 3000 + Math.floor(Math.random() * 5000); // 3–8 segundo
 
-  api.sendMessage(randomReply, threadID, (err, info) => {
-    if (err || !info) return;
-    // Bot reacts to its own roast with a HAHA emoji
-    api.setMessageReaction("😆", info.messageID, () => {}, true);
-  });
+  setTimeout(() => {
+    // Bago magsend, i-on muna ang "typing..." indicator kung kaya ng library,
+    // para lalong mukhang tao ang nagta-type, hindi robot na basta bigla
+    // na lang lumalabas ang message.
+    try {
+      api.sendTypingIndicator?.(threadID);
+    } catch (err) {
+      // Hindi lahat ng fork/library may ganitong method — huwag paalalahanan
+      // kung wala, tuloy pa rin ang roast reply.
+    }
+
+    api.sendMessage(randomReply, threadID, (err, info) => {
+      if (err || !info) return;
+      // Maliit na delay din bago mag-react, para hindi sabay-sabay
+      // (instant) ang reply + reaction — mas natural ang timing.
+      setTimeout(() => {
+        api.setMessageReaction("😆", info.messageID, () => {}, true);
+      }, 500 + Math.floor(Math.random() * 1000));
+    });
+  }, humanDelay);
 };
