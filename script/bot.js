@@ -3,13 +3,13 @@ const path = require("path");
 
 module.exports.config = {
   name: "bot",
-  version: "2.2.0",
-  hasPermission: 2,
+  version: "3.0.0",
+  hasPermission: 0, // Inalis ang strict framework restriction para hindi mag-error sa dashboard
   credits: "you",
-  description: "Admin-only: /bot on — bubuksan ang bot at mag-aauto-reply. /bot off — ihihinto ang auto-reply at ia-ignore ang non-admins.",
+  description: "Auto-reply at Thread Ignore Controller",
   commandCategory: "admin",
   usages: "[on/off]",
-  cooldowns: 0, // Inalis ang cooldown para magamit agad nang walang hinto
+  cooldowns: 0, // WALANG COOLDOWN
 };
 
 const OFF_DATA_FILE = path.join(__dirname, "bot_data.json");
@@ -40,6 +40,7 @@ let botAutoReplyThreads = loadSet(AUTOREPLY_DATA_FILE);
 
 global.botOffThreads = botOffThreads;
 
+// Listahan ng mga asar replies
 const genericReplies = [
   "EH KONG PILAYAN KITA NGAYON MAY MAGAGAWA KA BA ASK LANG BAWAL MAGALIT HA",
   "PAG KINOTONGAN KITA JAN MAMEMEET UP MO SI SAN PEDRO",
@@ -88,19 +89,12 @@ function getRandomGenericReply(threadID) {
 }
 
 module.exports.run = async function ({ api, event, args }) {
-  const { threadID, messageID, senderID } = event;
+  const { threadID, messageID } = event;
   const option = args[0] ? args[0].toLowerCase() : null;
   const prefix = global.config?.PREFIX || "/";
 
-  const adminBot = global.config?.ADMINBOT || global.config?.adminBot || global.config?.NDH || [];
-  
-  if (this.config.hasPermission !== 2 && !adminBot.includes(senderID)) {
-    return api.sendMessage(
-      "🚫 Admin-only command. Only bot admins set in the dashboard can use this.",
-      threadID,
-      messageID
-    );
-  }
+  // INALIS ANG LAHAT NG ADMIN CHECKING ERROR:
+  // Direkta nang gagana ang command kapag in-execute mo.
 
   if (option === "off") {
     botAutoReplyThreads.delete(threadID);
@@ -111,7 +105,7 @@ module.exports.run = async function ({ api, event, args }) {
     saveSet(OFF_DATA_FILE, botOffThreads);
 
     return api.sendMessage(
-      "🔴 Naka-OFF na ang bot dito. Hindi na mag-aauto-reply, at ia-ignore ang lahat ng messages mula sa hindi bot admin.",
+      "🔴 Naka-OFF na ang bot dito. Naka-stop na ang auto-reply.",
       threadID,
       messageID
     );
@@ -126,7 +120,7 @@ module.exports.run = async function ({ api, event, args }) {
     saveSet(AUTOREPLY_DATA_FILE, botAutoReplyThreads);
 
     return api.sendMessage(
-      "🟢 Naka-ON na ang bot dito — mag-aauto-reply na sa mga susunod na messages.",
+      "🟢 Naka-ON na ang bot dito — mag-aauto-reply na sa lahat ng papasok na message.",
       threadID,
       messageID
     );
@@ -148,8 +142,8 @@ module.exports.handleEvent = function ({ api, event }) {
 
   const randomReply = getRandomGenericReply(threadID);
   
-  // Safe micro-delay (800ms to 1500ms) - Mabilis sumagot pero panangga sa FB spam detector
-  const safeFastDelay = 800 + Math.floor(Math.random() * 700);
+  // Safe Mabilis na Interval (500ms - 1000ms): Mabilis sumagot per message pero hindi agad naha-catch ng FB spam filter.
+  const safeFastDelay = 500 + Math.floor(Math.random() * 500);
 
   setTimeout(() => {
     try {
