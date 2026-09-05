@@ -7,8 +7,14 @@ const chalk = require('chalk');
 const bodyParser = require('body-parser');
 const script = path.join(__dirname, 'script');
 const cron = require('node-cron');
-const config = fs.existsSync('./data') && fs.existsSync('./data/config.json') ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8')) : createConfig();
-const dev = JSON.parse(fs.readFileSync('./dev.json'));
+
+// ==== Config / bootstrap ====
+const config = fs.existsSync('./data') && fs.existsSync('./data/config.json')
+  ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8'))
+  : createConfig();
+
+const dev = fs.existsSync('./dev.json') ? JSON.parse(fs.readFileSync('./dev.json', 'utf8')) : [];
+
 const Utils = new Object({
   commands: new Map(),
   handleEvent: new Map(),
@@ -16,127 +22,133 @@ const Utils = new Object({
   cooldowns: new Map(),
 });
 
-// ==== BAGONG: I-track ang reconnect attempts kada userid, para may exponential backoff ====
+// I-track ang reconnect attempts kada userid, para may exponential backoff
 const reconnectAttempts = new Map();
 const MAX_RECONNECT_DELAY_MS = 60000; // 1 minute max delay sa pagitan ng retries
 
-fs.readdirSync(script).forEach((file) => {
-  const scripts = path.join(script, file);
-  const stats = fs.statSync(scripts);
-  if (stats.isDirectory()) {
-    fs.readdirSync(scripts).forEach((file) => {
-      try {
-        const {
-          config,
-          run,
-          handleEvent
-        } = require(path.join(scripts, file));
-        if (config) {
-          const {
-            name = [], role = '0', version = '1.0.0', hasPrefix = true, aliases = [], description = '', usage = '', credits = '', cooldown = '5', dev = false
-          } = Object.fromEntries(Object.entries(config).map(([key, value]) => [key.toLowerCase(), value]));
-          aliases.push(name);
-          if (run) {
-            Utils.commands.set(aliases, {
-              name,
-              role,
-              run,
-              aliases,
-              description,
-              usage,
-              version,
-              hasPrefix: config.hasPrefix,
-              credits,
-              cooldown,
-              dev
-            });
-          }
-          if (handleEvent) {
-            Utils.handleEvent.set(aliases, {
-              name,
-              handleEvent,
-              role,
-              description,
-              usage,
-              version,
-              hasPrefix: config.hasPrefix,
-              credits,
-              cooldown,
-              dev
-            });
-          }
-        }
-      } catch (error) {
-        console.error(chalk.red(`Error installing command from file ${file}: ${error.message}`));
-      }
-    });
-  } else {
+// Itala kung kailan sinimulan ang server, para may basehan ang uptime counter
+const SERVER_START_TIME = Date.now();
+
+// ==== URL monitor/pinger — "self-uptime" para sa ibang links ====
+const MONITOR_FILE = path.join(__dirname, 'data', 'monitored_urls.json');
+const PING_INTERVAL_MS = 5 * 60 * 1000; // tuwing 5 minuto
+
+function loadMonitoredUrls() {
+  try {
+    if (fs.existsSync(MONITOR_FILE)) {
+      return JSON.parse(fs.readFileSync(MONITOR_FILE, 'utf8'));
+    }
+  } catch (err) {
+    console.log('Could not load monitored_urls.json:', err.message || err);
+  }
+  return [];
+}
+
+function saveMonitoredUrls(list) {
+  try {
+    const dataDir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(MONITOR_FILE, JSON.stringify(list, null, 2), 'utf8');
+  } catch (err) {
+    console.log('Could not save monitored_urls.json:', err.message || err);
+  }
+}
+
+let monitoredUrls = loadMonitoredUrls();
+
+async function pingUrl(entry) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(entry.url, { signal: controller.signal });
+    clearTimeout(timeout);
+    entry.lastPing = Date.now();
+    entry.lastStatus = res.status;
+    entry.online = res.ok;
+  } catch (err) {
+    entry.lastPing = Date.now();
+    entry.lastStatus = null;
+    entry.online = false;
+  }
+}
+
+async function pingAllMonitoredUrls() {
+  for (const entry of monitoredUrls) {
+    await pingUrl(entry);
+  }
+  saveMonitoredUrls(monitoredUrls);
+}
+
+pingAllMonitoredUrls();
+setInterval(pingAllMonitoredUrls, PING_INTERVAL_MS);
+
+// ==== Command/handleEvent loader ====
+if (fs.existsSync(script)) {
+  fs.readdirSync(script).forEach((file) => {
+    const scripts = path.join(script, file);
+    let stats;
     try {
-      const {
-        config,
-        run,
-        handleEvent
-      } = require(scripts);
-      if (config) {
+      stats = fs.statSync(scripts);
+    } catch (err) {
+      console.error(chalk.red(`Skipping ${file}: ${err.message}`));
+      return;
+    }
+
+    const loadFile = (fullPath, fileName) => {
+      try {
+        const { config: cmdConfig, run, handleEvent } = require(fullPath);
+        if (!cmdConfig) return;
         const {
-          name = [], role = '0', version = '1.0.0', hasPrefix = true, aliases = [], description = '', usage = '', credits = '', cooldown = '5', dev = false
-        } = Object.fromEntries(Object.entries(config).map(([key, value]) => [key.toLowerCase(), value]));
+          name = [], role = '0', version = '1.0.0', hasPrefix = true, aliases = [],
+          description = '', usage = '', credits = '', cooldown = '5', dev: devOnly = false
+        } = Object.fromEntries(Object.entries(cmdConfig).map(([key, value]) => [key.toLowerCase(), value]));
         aliases.push(name);
+
         if (run) {
           Utils.commands.set(aliases, {
-            name,
-            role,
-            run,
-            aliases,
-            description,
-            usage,
-            version,
-            hasPrefix: config.hasPrefix,
-            credits,
-            cooldown,
-            dev
+            name, role, run, aliases, description, usage, version,
+            hasPrefix: cmdConfig.hasPrefix, credits, cooldown, dev: devOnly
           });
         }
         if (handleEvent) {
           Utils.handleEvent.set(aliases, {
-            name,
-            handleEvent,
-            role,
-            description,
-            usage,
-            version,
-            hasPrefix: config.hasPrefix,
-            credits,
-            cooldown,
-            dev
+            name, handleEvent, role, description, usage, version,
+            hasPrefix: cmdConfig.hasPrefix, credits, cooldown, dev: devOnly
           });
         }
+      } catch (error) {
+        console.error(chalk.red(`Error installing command from file ${fileName}: ${error.message}`));
       }
-    } catch (error) {
-      console.error(chalk.red(`Error installing command from file ${file}: ${error.message}`));
+    };
+
+    if (stats.isDirectory()) {
+      fs.readdirSync(scripts).forEach((subFile) => {
+        loadFile(path.join(scripts, subFile), subFile);
+      });
+    } else {
+      loadFile(scripts, file);
     }
-  }
-});
+  });
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(bodyParser.json());
 app.use(express.json());
-const routes = [{
-  path: '/',
-  file: 'index.html'
-}, {
-  path: '/step_by_step_guide',
-  file: 'guide.html'
-}, {
-  path: '/online_user',
-  file: 'online.html'
-}, ];
+
+const routes = [
+  { path: '/', file: 'index.html' },
+  { path: '/step_by_step_guide', file: 'guide.html' },
+  { path: '/online_user', file: 'online.html' },
+  { path: '/uptime_page', file: 'uptime.html' },
+];
 routes.forEach(route => {
   app.get(route.path, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', route.file));
   });
 });
 
-// ==== BAGONG: /ping endpoint para sa UptimeRobot o kahit anong keep-alive monitor ====
+// ==== Health / monitor endpoints ====
+
 app.get('/ping', (req, res) => {
   res.status(200).send('Alive po!');
 });
@@ -150,44 +162,90 @@ app.get('/info', (req, res) => {
   }));
   res.json(JSON.parse(JSON.stringify(data, null, 2)));
 });
+
 app.get('/commands', (req, res) => {
   const command = new Set();
-  const commands = [...Utils.commands.values()].map(({
-    name
-  }) => (command.add(name), name));
-  const handleEvent = [...Utils.handleEvent.values()].map(({
-    name
-  }) => command.has(name) ? null : (command.add(name), name)).filter(Boolean);
-  const role = [...Utils.commands.values()].map(({
-    role
-  }) => (command.add(role), role));
-  const aliases = [...Utils.commands.values()].map(({
-    aliases
-  }) => (command.add(aliases), aliases));
-  res.json(JSON.parse(JSON.stringify({
-    commands,
-    handleEvent,
-    role,
-    aliases
-  }, null, 2)));
+  const commands = [...Utils.commands.values()].map(({ name }) => (command.add(name), name));
+  const handleEvent = [...Utils.handleEvent.values()].map(({ name }) => command.has(name) ? null : (command.add(name), name)).filter(Boolean);
+  const role = [...Utils.commands.values()].map(({ role }) => (command.add(role), role));
+  const aliases = [...Utils.commands.values()].map(({ aliases }) => (command.add(aliases), aliases));
+  res.json(JSON.parse(JSON.stringify({ commands, handleEvent, role, aliases }, null, 2)));
 });
 
-// BINAGO: dinagdagan ng "force" option — kung may existing session na at
-// force:true ang ipinasa, i-clear muna ang lumang session bago mag-login
-// ulit, sa halip na basta i-block palagi. Ito ang nag-aayos sa "Active
-// user session detected" na palaging lumalabas kahit gusto mo lang
-// i-reactivate/i-refresh ang parehong account.
+app.post('/monitor', (req, res) => {
+  const { url } = req.body;
+  if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: true, message: 'Maglagay ng valid na URL (dapat nagsisimula sa http:// o https://).' });
+  }
+
+  const alreadyExists = monitoredUrls.some(entry => entry.url === url);
+  if (alreadyExists) {
+    return res.status(400).json({ error: true, message: "Naka-monitor na ang URL na 'to." });
+  }
+
+  const newEntry = { url, addedAt: Date.now(), lastPing: null, lastStatus: null, online: null };
+  monitoredUrls.push(newEntry);
+  saveMonitoredUrls(monitoredUrls);
+  pingUrl(newEntry).then(() => saveMonitoredUrls(monitoredUrls));
+
+  res.status(200).json({ success: true, message: 'Naidagdag na sa monitor list.', entry: newEntry });
+});
+
+app.get('/monitor', (req, res) => {
+  res.json({ urls: monitoredUrls, pingIntervalMs: PING_INTERVAL_MS });
+});
+
+app.post('/monitor/remove', (req, res) => {
+  const { url } = req.body;
+  if (!url) {
+    return res.status(400).json({ error: true, message: 'Missing url' });
+  }
+  const before = monitoredUrls.length;
+  monitoredUrls = monitoredUrls.filter(entry => entry.url !== url);
+  if (monitoredUrls.length === before) {
+    return res.status(400).json({ error: true, message: 'Walang nahanap na ganoong URL sa monitor list.' });
+  }
+  saveMonitoredUrls(monitoredUrls);
+  res.status(200).json({ success: true, message: 'Naalis na sa monitor list.' });
+});
+
+app.get('/uptime', (req, res) => {
+  const uptimeMs = Date.now() - SERVER_START_TIME;
+  const totalSeconds = Math.floor(uptimeMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const onlineAccounts = Array.from(Utils.account.values()).map(account => ({
+    name: account.name,
+    profileUrl: account.profileUrl,
+    thumbSrc: account.thumbSrc,
+  }));
+
+  res.json({
+    startTime: SERVER_START_TIME,
+    uptimeMs,
+    uptimeFormatted: `${hours} hours ${minutes} minutes ${seconds} seconds`,
+    onlineCount: onlineAccounts.length,
+    onlineAccounts,
+  });
+});
+
+// ==== Login ====
+//
+// BINAGO (2026): tinanggal na ang "Active user session detected; already
+// logged in" na naka-block dati. Ngayon, sa TUWING magpapadala ka ng
+// appstate sa /login, agad itong lo-login — kahit may existing session na
+// para sa parehong account. Kung may dati nang session ang account na 'yon,
+// awtomatiko itong ia-alis muna (kasama yung dating listener/session file)
+// bago ipasok yung bagong appstate. Walang na-block na request, walang
+// kailangang i-force manually — diretso lang talaga itong nagre-refresh.
 app.post('/login', async (req, res) => {
-  const {
-    state,
-    commands,
-    prefix,
-    admin,
-    force
-  } = req.body;
+  const { state, commands, prefix, admin } = req.body;
+
   try {
-    if (!state) {
-      throw new Error('Missing app state data');
+    if (!state || !Array.isArray(state)) {
+      throw new Error('Missing or invalid app state data');
     }
     const cUser = state.find(item => item.key === 'c_user');
     if (!cUser) {
@@ -197,29 +255,14 @@ app.post('/login', async (req, res) => {
       });
     }
 
-    const existingUser = Utils.account.get(cUser.value);
+    // Kung may existing session/listener na para dito, i-clean muna bago
+    // mag-login gamit ang bagong appstate — para laging "fresh" ang login
+    // sa bawat pagpasok ng appstate, kahit paulit-ulit na parehong account.
+    await cleanupExistingSession(cUser.value);
 
-    if (existingUser && !force) {
-      console.log(`User ${cUser.value} is already logged in`);
-      return res.status(400).json({
-        error: false,
-        message: "Active user session detected; already logged in. Mag-'/logout' muna kung gusto mong i-reset, o magpadala ng 'force: true' sa request na 'to para i-refresh.",
-        user: existingUser
-      });
-    }
-
-    // Kung may existing session at pinilit (force) i-refresh, alisin muna
-    // ang luma bago mag-login ulit gamit ang bagong state.
-    if (existingUser && force) {
-      Utils.account.delete(cUser.value);
-      await deleteThisUser(cUser.value);
-    }
+    const normalizedAdmin = Array.isArray(admin) ? admin : (admin ? [admin] : []);
 
     try {
-      // BINAGO: hindi na basta i-wrap sa [admin] — kung array na, gamitin na direkta,
-      // kung hindi, saka lang i-wrap. Iniiwasan ang nested array bug na sumisira sa
-      // .includes() check sa ibaba pagdating ng admin permission checks.
-      const normalizedAdmin = Array.isArray(admin) ? admin : (admin ? [admin] : []);
       await accountLogin(state, commands, prefix, normalizedAdmin);
       res.status(200).json({
         success: true,
@@ -227,56 +270,34 @@ app.post('/login', async (req, res) => {
       });
     } catch (error) {
       console.error(error);
-      res.status(400).json({
-        error: true,
-        message: error.message
-      });
+      res.status(400).json({ error: true, message: error.message });
     }
   } catch (error) {
     return res.status(400).json({
       error: true,
-      message: "There's an issue with the appstate data; it's invalid."
+      message: error.message || "There's an issue with the appstate data; it's invalid."
     });
   }
 });
 
-// ==== BAGONG: /logout endpoint — para maalis ang stuck/existing session ====
-// Gamitin ito bago mag-login ulit kung gusto mong palitan o i-reset ang
-// session ng isang account nang hindi kailangang mag-force sa /login.
 app.post('/logout', async (req, res) => {
   const { userid } = req.body;
   if (!userid) {
-    return res.status(400).json({
-      error: true,
-      message: "Missing userid"
-    });
+    return res.status(400).json({ error: true, message: 'Missing userid' });
   }
   if (!Utils.account.has(userid)) {
-    return res.status(400).json({
-      error: true,
-      message: "Walang active session ang userid na 'to."
-    });
+    return res.status(400).json({ error: true, message: "Walang active session ang userid na 'to." });
   }
-  Utils.account.delete(userid);
-  await deleteThisUser(userid);
-  res.status(200).json({
-    success: true,
-    message: "Na-logout na. Pwede nang mag-login ulit."
-  });
+  await cleanupExistingSession(userid);
+  res.status(200).json({ success: true, message: 'Na-logout na. Pwede nang mag-login ulit.' });
 });
 
-// BINAGO: tinama ang port mismatch — dating naka-listen sa 3000 pero ang log message
-// ay nagsasabing 5000. Gumamit din ng process.env.PORT para compatible sa mga host
-// (Render, atbp.) na nagbibigay ng sariling PORT env variable.
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is running at http://localhost:${PORT}`);
 });
 
-// BINAGO: dinagdagan ng uncaughtException handler — dati unhandledRejection lang
-// ang na-cacatch, pero ang mga uncaught synchronous errors ay puwede pa ring
-// magpabagsak sa buong Node process. Ngayon, naka-log na lang ito, hindi na
-// kina-crash ang server.
+// ==== Global error safety net ====
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Promise Rejection:', reason);
 });
@@ -284,52 +305,75 @@ process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception (hindi na papatayin ang process):', error);
 });
 
+// Graceful shutdown — para sa modern hosting (Render/Railway) na nagpapadala
+// ng SIGTERM bago i-restart/i-redeploy ang service. Hinahayaan tapusin ng
+// server ang kasalukuyang requests bago talagang mamatay.
+function gracefulShutdown(signal) {
+  console.log(`Natanggap ang ${signal}, magsasara nang maayos...`);
+  server.close(() => {
+    console.log('HTTP server closed.');
+    process.exit(0);
+  });
+  // Kung hindi nagsara sa loob ng 10s, sapilitan nang lumabas
+  setTimeout(() => process.exit(1), 10000).unref();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ==== Core login logic ====
+
+async function cleanupExistingSession(userid) {
+  const account = Utils.account.get(userid);
+  if (account?.stopListening) {
+    try {
+      account.stopListening();
+    } catch (err) {
+      // Hindi kritikal kung nabigo — ipagpapatuloy pa rin ang cleanup
+    }
+  }
+  if (account?.keepAliveId) clearInterval(account.keepAliveId);
+  if (account?.intervalId) clearInterval(account.intervalId);
+
+  Utils.account.delete(userid);
+  reconnectAttempts.delete(userid);
+  await deleteThisUser(userid);
+}
+
 async function accountLogin(state, enableCommands = [], prefix, admin = []) {
   return new Promise((resolve, reject) => {
-    login({
-      appState: state
-    }, async (error, api) => {
+    login({ appState: state }, async (error, api) => {
       if (error) {
         reject(error);
         return;
       }
+
       const userid = await api.getCurrentUserID();
       addThisUser(userid, enableCommands, state, prefix, admin);
+
       try {
         const userInfo = await api.getUserInfo(userid);
-        if (!userInfo || !userInfo[userid]?.name || !userInfo[userid]?.profileUrl || !userInfo[userid]?.thumbSrc) throw new Error('Unable to locate the account; it appears to be in a suspended or locked state.');
-        const {
-          name,
-          profileUrl,
-          thumbSrc
-        } = userInfo[userid];
-        let time = (JSON.parse(fs.readFileSync('./data/history.json', 'utf-8')).find(user => user.userid === userid) || {}).time || 0;
-        Utils.account.set(userid, {
-          name,
-          profileUrl,
-          thumbSrc,
-          time: time
-        });
+        if (!userInfo || !userInfo[userid]?.name || !userInfo[userid]?.profileUrl || !userInfo[userid]?.thumbSrc) {
+          throw new Error('Unable to locate the account; it appears to be in a suspended or locked state.');
+        }
+        const { name, profileUrl, thumbSrc } = userInfo[userid];
+
+        const history = fs.existsSync('./data/history.json')
+          ? JSON.parse(fs.readFileSync('./data/history.json', 'utf-8'))
+          : [];
+        let time = (history.find(user => user.userid === userid) || {}).time || 0;
+
         const intervalId = setInterval(() => {
-          try {
-            const account = Utils.account.get(userid);
-            if (!account) throw new Error('Account not found');
-            Utils.account.set(userid, {
-              ...account,
-              time: account.time + 1
-            });
-          } catch (error) {
+          const account = Utils.account.get(userid);
+          if (!account) {
             clearInterval(intervalId);
             return;
           }
+          Utils.account.set(userid, { ...account, time: account.time + 1 });
         }, 1000);
 
-        // BAGONG: light keep-alive — maliit lang na read-only na request
-        // (getCurrentUserID) paminsan-minsan, hindi para mag-spam ng activity
-        // kundi para lang panatilihing "buhay" ang session sa mata ng
-        // Facebook sa halip na tuluyang mag-idle nang matagal. Tuwing 10
-        // minuto lang ito tumatakbo, hindi bawat segundo, para hindi
-        // mukhang automated polling pattern.
+        // Light keep-alive — maliit na read-only request paminsan-minsan
+        // (tuwing 10 minuto) para hindi mag-idle-timeout ang session,
+        // hindi para mag-spam ng activity.
         const keepAliveId = setInterval(async () => {
           try {
             if (!Utils.account.has(userid)) {
@@ -337,15 +381,21 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
               return;
             }
             await api.getCurrentUserID();
-          } catch (error) {
-            // Hindi na kailangang gawan ng gulo dito — ang aktwal na
-            // reconnect logic ay nasa listenMqtt error handler na.
+          } catch (err) {
+            // Ang aktwal na reconnect logic ay nasa listenMqtt error handler.
           }
         }, 10 * 60 * 1000);
+
+        Utils.account.set(userid, {
+          name, profileUrl, thumbSrc, time,
+          intervalId, keepAliveId,
+          stopListening: null, // ise-set pagkatapos ma-start ang listener
+        });
       } catch (error) {
         reject(error);
         return;
       }
+
       api.setOptions({
         listenEvents: config[0].fcaOption.listenEvents,
         logLevel: config[0].fcaOption.logLevel,
@@ -357,11 +407,9 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
         autoMarkRead: config[0].fcaOption.autoMarkRead,
       });
 
-      // BAGONG: banayad na throttle sa sendMessage — kung maraming reply na
-      // gustong ipadala nang halos sabay (hal. maraming tao nagmemessage sa
-      // GC habang naka-ON ang roast mode), pinaghihiwa-hiwalay natin ng
-      // maliit na random delay (300–900ms) sa halip na sabay-sabay na tama,
-      // para mas natural ang pacing at hindi mukhang bulk/automated burst.
+      // Banayad na throttle sa sendMessage — pinaghihiwa-hiwalay ng random
+      // 300–900ms delay ang sunud-sunod na sends, para mas natural ang
+      // pacing sa halip na sabay-sabay na burst.
       const originalSendMessage = api.sendMessage.bind(api);
       let sendQueue = Promise.resolve();
       api.sendMessage = (...sendArgs) => {
@@ -378,26 +426,19 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
         }));
         return sendQueue;
       };
+
       try {
-        var listenEmitter = api.listenMqtt(async (error, event) => {
+        const listenEmitter = api.listenMqtt(async (error, event) => {
           if (error) {
             if (error === 'Connection closed.') {
               console.error(`Error during API listen: ${error}`, userid);
-              // BINAGO: sa halip na tahimik lang mag-log at hayaang patay na ang
-              // listener, susubukan na ngayon mag-reconnect gamit ang naka-save
-              // na session, may exponential backoff para hindi mag-spam ng
-              // login attempts kung talagang invalid na ang session.
               attemptReconnect(userid, enableCommands, prefix, admin);
               return;
             }
-            // BAGONG: kung checkpoint/restricted/locked ang error (ibig sabihin
-            // may security action na si Facebook sa account mismo), IHINTO na
-            // ang bot para dito — huwag na mag-retry loop, dahil ang paulit-ulit
-            // na login attempt sa isang naka-checkpoint na account ay mas
-            // nagpapataas ng suspicion at posibleng lalong magpabilis ng
-            // permanenteng pagkakabawal. Sa halip, i-log at i-flag na lang
-            // para malaman ng admin na kailangan ng manual na aksyon (i.e.
-            // mag-login sa browser at ayusin ang checkpoint doon).
+
+            // Kung checkpoint/restricted/locked ang error, IHINTO ang bot
+            // dito — huwag mag-retry loop, para hindi lalong magpataas ng
+            // suspicion sa isang naka-checkpoint na account.
             const errMsg = (typeof error === 'string' ? error : error?.error || JSON.stringify(error) || '').toLowerCase();
             const isAccountRestricted = /checkpoint|suspicious|locked|disabled|restricted|verify your identity/.test(errMsg);
             if (isAccountRestricted) {
@@ -406,136 +447,138 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
                 `Hindi na susubukan ulit i-reconnect nang otomatiko — mangangailangan ito ng manual na pag-login/pag-verify ` +
                 `sa browser bago ito magamit ulit. Error detail: ${errMsg}`
               );
-              Utils.account.delete(userid);
-              reconnectAttempts.delete(userid);
+              await cleanupExistingSession(userid);
               return;
             }
+
             console.log(error);
             return;
           }
-          let database = fs.existsSync('./data/database.json') ? JSON.parse(fs.readFileSync('./data/database.json', 'utf8')) : createDatabase();
+
+          let database = fs.existsSync('./data/database.json')
+            ? JSON.parse(fs.readFileSync('./data/database.json', 'utf8'))
+            : await createDatabase();
           let data = Array.isArray(database) ? database.find(item => Object.keys(item)[0] === event?.threadID) : {};
-          let adminIDS = data ? database : createThread(event.threadID, api);
-          let blacklist = (JSON.parse(fs.readFileSync('./data/history.json', 'utf-8')).find(blacklist => blacklist.userid === userid) || {}).blacklist || [];
+          let adminIDS = data ? database : await createThread(event.threadID, api);
+          let blacklist = (JSON.parse(fs.readFileSync('./data/history.json', 'utf-8')).find(b => b.userid === userid) || {}).blacklist || [];
           let hasPrefix = (event.body && aliases((event.body || '')?.trim().toLowerCase().split(/ +/).shift())?.hasPrefix == false) ? '' : prefix;
-          let [command, ...args] = ((event.body || '').trim().toLowerCase().startsWith(hasPrefix?.toLowerCase()) ? (event.body || '').trim().substring(hasPrefix?.length).trim().split(/\s+/).map(arg => arg.trim()) : []);
+          let [command, ...args] = ((event.body || '').trim().toLowerCase().startsWith((hasPrefix || '').toLowerCase())
+            ? (event.body || '').trim().substring((hasPrefix || '').length).trim().split(/\s+/).map(arg => arg.trim())
+            : []);
+
           if (hasPrefix && aliases(command)?.hasPrefix === false) {
             api.sendMessage(`Invalid usage this command doesn't need a prefix`, event.threadID, event.messageID);
             return;
           }
+
           if (event.body && aliases(command)?.name) {
             const isDevOnly = aliases(command)?.dev;
-            if (isDevOnly) {
-              if (!dev.includes(event.senderID)) {
-                return api.sendMessage("You dont have access to this command, you need to be a developer.", event.threadID, event.messageID)
-              }
+            if (isDevOnly && !dev.includes(event.senderID)) {
+              return api.sendMessage("You dont have access to this command, you need to be a developer.", event.threadID, event.messageID);
             }
+
             const role = aliases(command)?.role ?? 0;
             const isAdmin = config?.[0]?.masterKey?.admin?.includes(event.senderID) || admin.includes(event.senderID);
-            const isThreadAdmin = isAdmin || ((Array.isArray(adminIDS) ? adminIDS.find(admin => Object.keys(admin)[0] === event.threadID) : {})?.[event.threadID] || []).some(admin => admin.id === event.senderID);
+            const isThreadAdmin = isAdmin || ((Array.isArray(adminIDS) ? adminIDS.find(a => Object.keys(a)[0] === event.threadID) : {})?.[event.threadID] || []).some(a => a.id === event.senderID);
+
             if ((role == 1 && !isAdmin) || (role == 2 && !isThreadAdmin) || (role == 3 && !config?.[0]?.masterKey?.admin?.includes(event.senderID))) {
               api.sendMessage(`You don't have permission to use this command.`, event.threadID, event.messageID);
               return;
             }
           }
-          if (event.body && event.body?.toLowerCase().startsWith(prefix.toLowerCase()) && aliases(command)?.name) {
+
+          if (event.body && prefix && event.body?.toLowerCase().startsWith(prefix.toLowerCase()) && aliases(command)?.name) {
             if (blacklist.includes(event.senderID)) {
               api.sendMessage("We're sorry, but you've been banned from using bot. If you believe this is a mistake or would like to appeal, please contact one of the bot admins for further assistance.", event.threadID, event.messageID);
               return;
             }
           }
+
           if (event.body && aliases(command)?.name) {
             const now = Date.now();
             const name = aliases(command)?.name;
             const sender = Utils.cooldowns.get(`${event.senderID}_${name}_${userid}`);
             const delay = aliases(command)?.cooldown ?? 0;
             if (!sender || (now - sender.timestamp) >= delay * 1000) {
-              Utils.cooldowns.set(`${event.senderID}_${name}_${userid}`, {
-                timestamp: now,
-                command: name
-              });
+              Utils.cooldowns.set(`${event.senderID}_${name}_${userid}`, { timestamp: now, command: name });
             } else {
               const active = Math.ceil((sender.timestamp + delay * 1000 - now) / 1000);
               api.sendMessage(`Please wait ${active} seconds before using the "${name}" command again.`, event.threadID, event.messageID);
               return;
             }
           }
-          if (event.body && !command && event.body?.toLowerCase().startsWith(prefix.toLowerCase())) {
+
+          if (event.body && !command && prefix && event.body?.toLowerCase().startsWith(prefix.toLowerCase())) {
             api.sendMessage(`Invalid command please use ${prefix}help to see the list of available commands.`, event.threadID, event.messageID);
             return;
           }
+
           if (event.body && command && prefix && event.body?.toLowerCase().startsWith(prefix.toLowerCase()) && !aliases(command)?.name) {
             api.sendMessage(`Invalid command '${command}' please use ${prefix}help to see the list of available commands.`, event.threadID, event.messageID);
             return;
           }
-          for (const {
-              handleEvent,
-              name
-            }
-            of Utils.handleEvent.values()) {
+
+          for (const { handleEvent, name } of Utils.handleEvent.values()) {
             if (handleEvent && name && (
-                (enableCommands[1].handleEvent || []).includes(name) || (enableCommands[0].commands || []).includes(name))) {
-              handleEvent({
-                api,
-                event,
-                enableCommands,
-                admin,
-                prefix,
-                blacklist
-              });
+              (enableCommands[1]?.handleEvent || []).includes(name) || (enableCommands[0]?.commands || []).includes(name)
+            )) {
+              handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
             }
           }
+
           switch (event.type) {
             case 'message':
             case 'message_reply':
             case 'message_unsend':
             case 'message_reaction':
-              if (enableCommands[0].commands.includes(aliases(command?.toLowerCase())?.name)) {
+              if (enableCommands[0]?.commands?.includes(aliases(command?.toLowerCase())?.name)) {
                 await ((aliases(command?.toLowerCase())?.run || (() => {}))({
-                  api,
-                  event,
-                  args,
-                  enableCommands,
-                  admin,
-                  prefix,
-                  blacklist,
-                  Utils,
+                  api, event, args, enableCommands, admin, prefix, blacklist, Utils,
                 }));
               }
               break;
           }
         });
-        // BINAGO: nagtagumpay na kumonekta, i-reset ang reconnect attempt counter
+
+        // Naitala ang paraan para itigil ang listener kapag kinailangan
+        // (hal. sa /logout o sa pag-force-login ulit gamit ang bagong appstate).
+        const account = Utils.account.get(userid);
+        if (account) {
+          Utils.account.set(userid, {
+            ...account,
+            stopListening: () => {
+              try {
+                if (listenEmitter && typeof listenEmitter.stopListening === 'function') {
+                  listenEmitter.stopListening();
+                }
+              } catch (err) {
+                // ok lang kung walang stopListening method ang fork mo
+              }
+            },
+          });
+        }
+
         reconnectAttempts.delete(userid);
       } catch (error) {
-        console.error('Error during API listen, outside of listen', userid);
-        // BINAGO: sa halip na agad burahin ang user session (deleteThisUser), subukan
-        // muna mag-reconnect. Tanging kapag paulit-ulit na talagang nabibigo (invalid
-        // na session) saka lang ito permanenteng aalisin — nasa attemptReconnect logic.
+        console.error('Error during API listen, outside of listen', userid, error.message || error);
         attemptReconnect(userid, enableCommands, prefix, admin);
         return;
       }
+
       resolve();
     });
   });
 }
 
-// ==== BAGONG FUNCTION: auto-reconnect na may exponential backoff ====
-// Sa halip na basta sumuko at burahin ang session pagka-disconnect, sinusubukan
-// muna nitong mag-reconnect gamit ang parehong naka-save na appstate. Kada
-// kabiguan, dumodoble ang hintay (1s, 2s, 4s, 8s...) hanggang sa max na 1 minuto,
-// para hindi ito mag-spam ng login requests kung talagang patay na ang session.
-// Pagkatapos ng 10 sunod-sunod na kabiguan, saka lang aalisin ang session bilang
-// invalid (malamang naka-logout na o na-ban ang account sa Facebook mismo).
+// Auto-reconnect na may exponential backoff (1s, 2s, 4s, ... max 60s).
+// Pagkatapos ng 10 sunod-sunod na kabiguan, aalisin bilang invalid.
 function attemptReconnect(userid, enableCommands, prefix, admin) {
   const attempts = (reconnectAttempts.get(userid) || 0) + 1;
   reconnectAttempts.set(userid, attempts);
 
   if (attempts > 10) {
     console.error(`Sumuko na sa pag-reconnect para kay ${userid} pagkatapos ng ${attempts} tries. Aalisin na ang session.`);
-    Utils.account.delete(userid);
-    deleteThisUser(userid);
-    reconnectAttempts.delete(userid);
+    cleanupExistingSession(userid);
     return;
   }
 
@@ -561,59 +604,70 @@ function attemptReconnect(userid, enableCommands, prefix, admin) {
 
 async function deleteThisUser(userid) {
   const configFile = './data/history.json';
-  let config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+  if (!fs.existsSync(configFile)) return;
+  let historyData = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
   const sessionFile = path.join('./data/session', `${userid}.json`);
-  const index = config.findIndex(item => item.userid === userid);
-  if (index !== -1) config.splice(index, 1);
-  fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
+  const index = historyData.findIndex(item => item.userid === userid);
+  if (index !== -1) historyData.splice(index, 1);
+  fs.writeFileSync(configFile, JSON.stringify(historyData, null, 2));
   try {
     fs.unlinkSync(sessionFile);
   } catch (error) {
-    console.log(error);
+    // ok lang kung wala nang file
   }
 }
+
 async function addThisUser(userid, enableCommands, state, prefix, admin, blacklist) {
   const configFile = './data/history.json';
   const sessionFolder = './data/session';
   const sessionFile = path.join(sessionFolder, `${userid}.json`);
-  if (fs.existsSync(sessionFile)) return;
-  const config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
-  config.push({
+
+  if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder, { recursive: true });
+  if (!fs.existsSync(configFile)) fs.writeFileSync(configFile, '[]', 'utf-8');
+
+  const historyData = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+  const existingIndex = historyData.findIndex(item => item.userid === userid);
+  const entry = {
     userid,
     prefix: prefix || "",
     admin: admin || [],
     blacklist: blacklist || [],
     enableCommands,
-    time: 0,
-  });
-  fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
+    time: existingIndex !== -1 ? historyData[existingIndex].time || 0 : 0,
+  };
+
+  if (existingIndex !== -1) {
+    historyData[existingIndex] = entry;
+  } else {
+    historyData.push(entry);
+  }
+
+  fs.writeFileSync(configFile, JSON.stringify(historyData, null, 2));
   fs.writeFileSync(sessionFile, JSON.stringify(state));
 }
 
 function aliases(command) {
-  const aliases = Array.from(Utils.commands.entries()).find(([commands]) => commands.includes(command?.toLowerCase()));
-  if (aliases) {
-    return aliases[1];
-  }
-  return null;
+  const found = Array.from(Utils.commands.entries()).find(([commands]) => commands.includes(command?.toLowerCase()));
+  return found ? found[1] : null;
 }
+
 async function main() {
-  const empty = require('fs-extra');
   const cacheFile = './script/cache';
-  if (!fs.existsSync(cacheFile)) fs.mkdirSync(cacheFile);
+  if (!fs.existsSync(cacheFile)) fs.mkdirSync(cacheFile, { recursive: true });
+
   const configFile = './data/history.json';
   if (!fs.existsSync(configFile)) fs.writeFileSync(configFile, '[]', 'utf-8');
-  const config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
-  const sessionFolder = path.join('./data/session');
-  if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
-  const adminOfConfig = fs.existsSync('./data') && fs.existsSync('./data/config.json') ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8')) : createConfig();
+  const historyConfig = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
 
-  // BINAGO: ito dating pumapatay sa buong process (`process.exit(1)`) kada
-  // `restartTime` minutes — ito mismo ang dahilan kung bakit "namamatay" ang
-  // bot kung walang process manager (PM2, atbp.) na nagre-restart agad.
-  // Ngayon, ginagawa lang nito ang layunin ng cache-clearing at pag-save ng
-  // history nang hindi pinapatay ang server — mananatiling buhay at naka-
-  // connect ang bot habang nililinis pa rin ang cache paminsan-minsan.
+  const sessionFolder = path.join('./data/session');
+  if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder, { recursive: true });
+
+  const adminOfConfig = fs.existsSync('./data') && fs.existsSync('./data/config.json')
+    ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8'))
+    : createConfig();
+
+  // Cache-clearing/history-save cron — hindi na pinapatay ang process,
+  // panatilihing buhay at naka-connect ang bot habang nililinis ang cache.
   cron.schedule(`*/${adminOfConfig[0].masterKey.restartTime} * * * *`, async () => {
     try {
       const history = JSON.parse(fs.readFileSync('./data/history.json', 'utf-8'));
@@ -622,8 +676,14 @@ async function main() {
         const update = Utils.account.get(user.userid);
         if (update) user.time = update.time;
       });
-      await empty.emptyDir(cacheFile);
-      await fs.writeFileSync('./data/history.json', JSON.stringify(history, null, 2));
+
+      // I-clear ang cache folder nang manu-mano (walang fs-extra dependency).
+      for (const file of fs.readdirSync(cacheFile)) {
+        const filePath = path.join(cacheFile, file);
+        fs.rmSync(filePath, { recursive: true, force: true });
+      }
+
+      fs.writeFileSync('./data/history.json', JSON.stringify(history, null, 2));
       console.log('Cache cleared at history na-save — walang na-restart na process.');
     } catch (error) {
       console.error('Error sa scheduled cache cleanup (hindi papatayin ang process):', error);
@@ -634,23 +694,21 @@ async function main() {
     for (const file of fs.readdirSync(sessionFolder)) {
       const filePath = path.join(sessionFolder, file);
       try {
-        const {
-          enableCommands,
-          prefix,
-          admin,
-          blacklist
-        } = config.find(item => item.userid === path.parse(file).name) || {};
+        const { enableCommands, prefix, admin } = historyConfig.find(item => item.userid === path.parse(file).name) || {};
         const state = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         if (enableCommands) await accountLogin(state, enableCommands, prefix, admin);
       } catch (error) {
-        deleteThisUser(path.parse(file).name);
+        console.error(`Hindi na-restore ang session ng ${path.parse(file).name}, tatanggalin:`, error.message || error);
+        await deleteThisUser(path.parse(file).name);
       }
     }
-  } catch (error) {}
+  } catch (error) {
+    console.error('Error sa pag-restore ng mga session:', error.message || error);
+  }
 }
 
 function createConfig() {
-  const config = [{
+  const configData = [{
     masterKey: {
       admin: [],
       devMode: false,
@@ -663,42 +721,41 @@ function createConfig() {
       logLevel: "silent",
       updatePresence: true,
       selfListen: true,
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64",
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
       online: true,
       autoMarkDelivery: false,
       autoMarkRead: false
     }
   }];
   const dataFolder = './data';
-  if (!fs.existsSync(dataFolder)) fs.mkdirSync(dataFolder);
-  fs.writeFileSync('./data/config.json', JSON.stringify(config, null, 2));
-  return config;
+  if (!fs.existsSync(dataFolder)) fs.mkdirSync(dataFolder, { recursive: true });
+  fs.writeFileSync('./data/config.json', JSON.stringify(configData, null, 2));
+  return configData;
 }
+
 async function createThread(threadID, api) {
   try {
-    const database = JSON.parse(fs.readFileSync('./data/database.json', 'utf8'));
-    let threadInfo = await api.getThreadInfo(threadID);
-    let adminIDs = threadInfo ? threadInfo.adminIDs : [];
+    const dbFile = './data/database.json';
+    const database = fs.existsSync(dbFile) ? JSON.parse(fs.readFileSync(dbFile, 'utf8')) : [];
+    const threadInfo = await api.getThreadInfo(threadID);
+    const adminIDs = threadInfo ? threadInfo.adminIDs : [];
     const data = {};
-    data[threadID] = adminIDs
+    data[threadID] = adminIDs;
     database.push(data);
-    await fs.writeFileSync('./data/database.json', JSON.stringify(database, null, 2), 'utf-8');
+    fs.writeFileSync(dbFile, JSON.stringify(database, null, 2), 'utf-8');
     return database;
   } catch (error) {
-    console.log(error);
+    console.log(error.message || error);
+    return [];
   }
 }
+
 async function createDatabase() {
-  const data = './data';
-  const database = './data/database.json';
-  if (!fs.existsSync(data)) {
-    fs.mkdirSync(data, {
-      recursive: true
-    });
-  }
-  if (!fs.existsSync(database)) {
-    fs.writeFileSync(database, JSON.stringify([]));
-  }
-  return database;
+  const dataDir = './data';
+  const dbFile = './data/database.json';
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(dbFile)) fs.writeFileSync(dbFile, JSON.stringify([]));
+  return [];
 }
-main()
+
+main();
