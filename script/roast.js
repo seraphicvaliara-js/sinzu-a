@@ -6,7 +6,7 @@ module.exports.config = {
   version: "4.0.0",
   hasPermission: 0,
   credits: "you",
-  description: "Toggle roast-mode autoreply on/off — random savage one-liner replies to every message in the thread. Persistent and handles rapid-fire messages independently.",
+  description: "Toggle roast-mode autoreply on/off — random savage one-liner replies to every message sent by a bot admin (others are ignored). Persistent and handles rapid-fire messages independently.",
   commandCategory: "fun",
   usages: "[on/off]",
   cooldowns: 3,
@@ -113,6 +113,11 @@ module.exports.handleEvent = function ({ api, event }) {
   if (!roastThreads.has(threadID)) return;
   if (!body) return;
   if (senderID === api.getCurrentUserID()) return;
+
+  // I-ignore ang message kung hindi bot admin ang nagsend — IDs galing sa
+  // global.config.adminBot (yung nilalagay mo sa dashboard/config).
+  const adminBot = global.config?.adminBot || [];
+  if (!adminBot.includes(senderID)) return;
 
   const randomReply = getRandomReply(threadID);
 
