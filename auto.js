@@ -7,14 +7,62 @@ const chalk = require('chalk');
 const bodyParser = require('body-parser');
 const script = path.join(__dirname, 'script');
 const cron = require('node-cron');
-const config = fs.existsSync('./data') && fs.existsSync('./data/config.json') ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8')) : createConfig();
-const dev = JSON.parse(fs.readFileSync('./dev.json'));
+
+// ---------------------------------------------------------------------------
+// Safe JSON helpers — bawat pagbasa/pagsulat ng JSON ay naka-guard na para
+// hindi bumagsak ang buong bot kung masira/mag-corrupt ang isang data file.
+// ---------------------------------------------------------------------------
+function safeReadJSON(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    if (!raw || !raw.trim()) return fallback;
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error(chalk.red(`[safeReadJSON] Hindi mabasa ang ${filePath}: ${err.message}`));
+    return fallback;
+  }
+}
+
+function safeWriteJSON(filePath, data) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    return true;
+  } catch (err) {
+    console.error(chalk.red(`[safeWriteJSON] Hindi maisulat ang ${filePath}: ${err.message}`));
+    return false;
+  }
+}
+
+// Wrapper sa api.sendMessage para hindi mag-unhandled rejection at hindi
+// bumagsak ang listener kahit mabigo ang isang message.
+function safeSend(api, message, threadID, messageID) {
+  try {
+    const result = api.sendMessage(message, threadID, messageID);
+    if (result && typeof result.catch === 'function') {
+      result.catch((err) => {
+        console.error(chalk.red(`[safeSend] Hindi naipadala sa thread ${threadID}: ${err?.message || err}`));
+      });
+    }
+    return result;
+  } catch (err) {
+    console.error(chalk.red(`[safeSend] Error sa sendMessage: ${err.message}`));
+  }
+}
+
+const config = fs.existsSync('./data') && fs.existsSync('./data/config.json')
+  ? safeReadJSON('./data/config.json', null) || createConfig()
+  : createConfig();
+
+const dev = safeReadJSON('./dev.json', []);
+
 const Utils = new Object({
   commands: new Map(),
   handleEvent: new Map(),
   account: new Map(),
   cooldowns: new Map(),
 });
+
 // Siguraduhing meron na ang ./data folder, history.json, at session folder
 // BAGO mag-load ng commands — dahil may commands (tulad ng active-session.js)
 // na nagbabasa/naghahanap ng history.json habang nilo-load pa lang sila.
@@ -22,459 +70,461 @@ if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
 if (!fs.existsSync('./data/history.json')) fs.writeFileSync('./data/history.json', '[]', 'utf-8');
 if (!fs.existsSync('./data/session')) fs.mkdirSync('./data/session', { recursive: true });
 if (!fs.existsSync('./data/database.json')) fs.writeFileSync('./data/database.json', '[]', 'utf-8');
-fs.readdirSync(script).forEach((file) => {
-  const scripts = path.join(script, file);
-  const stats = fs.statSync(scripts);
-  if (stats.isDirectory()) {
-    fs.readdirSync(scripts).forEach((file) => {
-      try {
-        const {
-          config,
-          run,
-          handleEvent
-        } = require(path.join(scripts, file));
-        if (config) {
-          const {
-            name = [], role = '0', version = '1.0.0', hasPrefix = true, aliases = [], description = '', usage = '', credits = '', cooldown = '5', dev = false
-          } = Object.fromEntries(Object.entries(config).map(([key, value]) => [key.toLowerCase(), value]));
-          aliases.push(name);
-          if (run) {
-            Utils.commands.set(aliases, {
-              name,
-              role,
-              run,
-              aliases,
-              description,
-              usage,
-              version,
-              hasPrefix: config.hasPrefix,
-              credits,
-              cooldown,
-              dev
-            });
-          }
-          if (handleEvent) {
-            Utils.handleEvent.set(aliases, {
-              name,
-              handleEvent,
-              role,
-              description,
-              usage,
-              version,
-              hasPrefix: config.hasPrefix,
-              credits,
-              cooldown,
-              dev
-            });
-          }
-        }
-      } catch (error) {
-        console.error(chalk.red(`Error installing command from file ${file}: ${error.message}`));
-      }
-    });
-  } else {
-    try {
-      const {
-        config,
-        run,
-        handleEvent
-      } = require(scripts);
-      if (config) {
-        const {
-          name = [], role = '0', version = '1.0.0', hasPrefix = true, aliases = [], description = '', usage = '', credits = '', cooldown = '5', dev = false
-        } = Object.fromEntries(Object.entries(config).map(([key, value]) => [key.toLowerCase(), value]));
-        aliases.push(name);
-        if (run) {
-          Utils.commands.set(aliases, {
-            name,
-            role,
-            run,
-            aliases,
-            description,
-            usage,
-            version,
-            hasPrefix: config.hasPrefix,
-            credits,
-            cooldown,
-            dev
-          });
-        }
-        if (handleEvent) {
-          Utils.handleEvent.set(aliases, {
-            name,
-            handleEvent,
-            role,
-            description,
-            usage,
-            version,
-            hasPrefix: config.hasPrefix,
-            credits,
-            cooldown,
-            dev
-          });
-        }
-      }
-    } catch (error) {
-      console.error(chalk.red(`Error installing command from file ${file}: ${error.message}`));
-    }
-  }
-});
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(bodyParser.json());
-app.use(express.json());
-const routes = [{
-  path: '/',
-  file: 'index.html'
-}, {
-  path: '/step_by_step_guide',
-  file: 'guide.html'
-}, {
-  path: '/online_user',
-  file: 'online.html'
-}, ];
-routes.forEach(route => {
-  app.get(route.path, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', route.file));
-  });
-});
-app.get('/info', (req, res) => {
-  const data = Array.from(Utils.account.values()).map(account => ({
-    name: account.name,
-    profileUrl: account.profileUrl,
-    thumbSrc: account.thumbSrc,
-    time: account.time
-  }));
-  res.json(JSON.parse(JSON.stringify(data, null, 2)));
-});
-app.get('/commands', (req, res) => {
-  const command = new Set();
-  const commands = [...Utils.commands.values()].map(({
-    name
-  }) => (command.add(name), name));
-  const handleEvent = [...Utils.handleEvent.values()].map(({
-    name
-  }) => command.has(name) ? null : (command.add(name), name)).filter(Boolean);
-  const role = [...Utils.commands.values()].map(({
-    role
-  }) => (command.add(role), role));
-  const aliases = [...Utils.commands.values()].map(({
-    aliases
-  }) => (command.add(aliases), aliases));
-  res.json(JSON.parse(JSON.stringify({
-    commands,
-    handleEvent,
-    role,
-    aliases
-  }, null, 2)));
-});
-app.post('/login', async (req, res) => {
-  const {
-    state,
-    commands,
-    prefix,
-    admin
-  } = req.body;
+
+// ---------------------------------------------------------------------------
+// Command/Event loader — try/catch na sa bawat file, kaya kahit may sirang
+// isang command file, tuloy pa rin ang pag-load ng iba.
+// ---------------------------------------------------------------------------
+function registerModule(scriptPath, file) {
   try {
-    if (!state) {
-      throw new Error('Missing app state data');
+    const { config: cfg, run, handleEvent } = require(scriptPath);
+    if (!cfg) return;
+
+    const {
+      name = [], role = '0', version = '1.0.0', hasPrefix = true, aliases = [],
+      description = '', usage = '', credits = '', cooldown = '5', dev: devOnly = false,
+    } = Object.fromEntries(Object.entries(cfg).map(([key, value]) => [key.toLowerCase(), value]));
+
+    const finalAliases = Array.isArray(aliases) ? [...aliases] : [aliases];
+    finalAliases.push(name);
+
+    if (run) {
+      Utils.commands.set(finalAliases, {
+        name, role, run, aliases: finalAliases, description, usage, version,
+        hasPrefix: cfg.hasPrefix, credits, cooldown, dev: devOnly,
+      });
     }
-    const cUser = state.find(item => item.key === 'c_user');
-    if (cUser) {
-      const existingUser = Utils.account.get(cUser.value);
-      if (existingUser) {
-        console.log(`User ${cUser.value} is already logged in`);
-        return res.status(400).json({
-          error: false,
-          message: "Active user session detected; already logged in",
-          user: existingUser
-        });
-      } else {
-        try {
-          await accountLogin(state, commands, prefix, [admin]);
-          res.status(200).json({
-            success: true,
-            message: 'Authentication process completed successfully; login achieved.'
-          });
-        } catch (error) {
-          console.error(error);
-          res.status(400).json({
-            error: true,
-            message: error.message
-          });
-        }
-      }
-    } else {
-      return res.status(400).json({
-        error: true,
-        message: "There's an issue with the appstate data; it's invalid."
+    if (handleEvent) {
+      Utils.handleEvent.set(finalAliases, {
+        name, handleEvent, role, description, usage, version,
+        hasPrefix: cfg.hasPrefix, credits, cooldown, dev: devOnly,
       });
     }
   } catch (error) {
-    return res.status(400).json({
-      error: true,
-      message: "There's an issue with the appstate data; it's invalid."
-    });
+    console.error(chalk.red(`Error installing command from file ${file}: ${error.message}`));
+  }
+}
+
+try {
+  fs.readdirSync(script).forEach((file) => {
+    const scripts = path.join(script, file);
+    let stats;
+    try {
+      stats = fs.statSync(scripts);
+    } catch (err) {
+      console.error(chalk.red(`Hindi ma-stat ang ${scripts}: ${err.message}`));
+      return;
+    }
+    if (stats.isDirectory()) {
+      try {
+        fs.readdirSync(scripts).forEach((inner) => registerModule(path.join(scripts, inner), inner));
+      } catch (err) {
+        console.error(chalk.red(`Hindi ma-basa ang folder ${scripts}: ${err.message}`));
+      }
+    } else {
+      registerModule(scripts, file);
+    }
+  });
+} catch (err) {
+  console.error(chalk.red(`Hindi ma-load ang script folder: ${err.message}`));
+}
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(bodyParser.json());
+app.use(express.json());
+
+const routes = [
+  { path: '/', file: 'index.html' },
+  { path: '/step_by_step_guide', file: 'guide.html' },
+  { path: '/online_user', file: 'online.html' },
+];
+routes.forEach((route) => {
+  app.get(route.path, (req, res) => {
+    try {
+      res.sendFile(path.join(__dirname, 'public', route.file));
+    } catch (err) {
+      res.status(500).json({ error: true, message: 'Hindi ma-serve ang page.' });
+    }
+  });
+});
+
+app.get('/info', (req, res) => {
+  try {
+    const data = Array.from(Utils.account.values()).map((account) => ({
+      name: account.name,
+      profileUrl: account.profileUrl,
+      thumbSrc: account.thumbSrc,
+      time: account.time,
+    }));
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: true, message: err.message });
   }
 });
-app.listen(3000, () => {
-  console.log(`Server is running at http://localhost:5000`);
+
+app.get('/commands', (req, res) => {
+  try {
+    const command = new Set();
+    const commands = [...Utils.commands.values()].map(({ name }) => (command.add(name), name));
+    const handleEvent = [...Utils.handleEvent.values()]
+      .map(({ name }) => (command.has(name) ? null : (command.add(name), name)))
+      .filter(Boolean);
+    const role = [...Utils.commands.values()].map(({ role }) => (command.add(role), role));
+    const aliases = [...Utils.commands.values()].map(({ aliases }) => (command.add(aliases), aliases));
+    res.json({ commands, handleEvent, role, aliases });
+  } catch (err) {
+    res.status(500).json({ error: true, message: err.message });
+  }
 });
+
+app.post('/login', async (req, res) => {
+  const { state, commands, prefix, admin } = req.body || {};
+  try {
+    if (!state) {
+      return res.status(400).json({ error: true, message: 'Missing app state data' });
+    }
+    const cUser = Array.isArray(state) ? state.find((item) => item.key === 'c_user') : null;
+    if (!cUser) {
+      return res.status(400).json({ error: true, message: "There's an issue with the appstate data; it's invalid." });
+    }
+    const existingUser = Utils.account.get(cUser.value);
+    if (existingUser) {
+      console.log(`User ${cUser.value} is already logged in`);
+      return res.status(400).json({
+        error: false,
+        message: 'Active user session detected; already logged in',
+        user: existingUser,
+      });
+    }
+    try {
+      await accountLogin(state, commands, prefix, [admin]);
+      res.status(200).json({ success: true, message: 'Authentication process completed successfully; login achieved.' });
+    } catch (error) {
+      console.error(error);
+      res.status(400).json({ error: true, message: error.message });
+    }
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ error: true, message: "There's an issue with the appstate data; it's invalid." });
+  }
+});
+
+const PORT = 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running at http://localhost:${PORT}`);
+});
+
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Promise Rejection:', reason);
+  console.error(chalk.red('Unhandled Promise Rejection:'), reason);
 });
+process.on('uncaughtException', (error) => {
+  console.error(chalk.red('Uncaught Exception:'), error);
+  // Hindi natin ito ipapa-crash agad — nilo-log lang para malaman ang cause,
+  // pero ang cron restart pa rin ang bahala sa scheduled na pag-restart.
+});
+
 async function accountLogin(state, enableCommands = [], prefix, admin = []) {
   // Palaging i-enable LAHAT ng na-load na commands/events sa halip na
-  // umasa sa listahan na galing sa login form (na siyang dahilan
-  // kung bakit "help" lang ang gumagana dati). Ang role/permission
-  // check sa ibaba (role 1/2/3 = admin/owner-only) ay hindi nagbago,
-  // kaya nananatiling protektado ang mga admin-only command.
+  // umasa sa listahan na galing sa login form.
   enableCommands = [
-    { commands: Array.from(Utils.commands.values()).map(c => c.name) },
-    { handleEvent: Array.from(Utils.handleEvent.values()).map(c => c.name) }
+    { commands: Array.from(Utils.commands.values()).map((c) => c.name) },
+    { handleEvent: Array.from(Utils.handleEvent.values()).map((c) => c.name) },
   ];
+
   return new Promise((resolve, reject) => {
-    login({
-      appState: state
-    }, async (error, api) => {
+    login({ appState: state }, async (error, api) => {
       if (error) {
         reject(error);
         return;
       }
-      const userid = await api.getCurrentUserID();
-      addThisUser(userid, enableCommands, state, prefix, admin);
+
+      let userid;
+      try {
+        userid = await api.getCurrentUserID();
+        addThisUser(userid, enableCommands, state, prefix, admin);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+
       try {
         const userInfo = await api.getUserInfo(userid);
-        if (!userInfo || !userInfo[userid]?.name || !userInfo[userid]?.profileUrl || !userInfo[userid]?.thumbSrc) throw new Error('Unable to locate the account; it appears to be in a suspended or locked state.');
-        const {
-          name,
-          profileUrl,
-          thumbSrc
-        } = userInfo[userid];
-        let time = (JSON.parse(fs.readFileSync('./data/history.json', 'utf-8')).find(user => user.userid === userid) || {}).time || 0;
-        Utils.account.set(userid, {
-          name,
-          profileUrl,
-          thumbSrc,
-          time: time
-        });
+        if (!userInfo || !userInfo[userid]?.name || !userInfo[userid]?.profileUrl || !userInfo[userid]?.thumbSrc) {
+          throw new Error('Unable to locate the account; it appears to be in a suspended or locked state.');
+        }
+        const { name, profileUrl, thumbSrc } = userInfo[userid];
+        const history = safeReadJSON('./data/history.json', []);
+        const time = (Array.isArray(history) ? history.find((u) => u.userid === userid) : null)?.time || 0;
+        Utils.account.set(userid, { name, profileUrl, thumbSrc, time });
+
         const intervalId = setInterval(() => {
           try {
             const account = Utils.account.get(userid);
-            if (!account) throw new Error('Account not found');
-            Utils.account.set(userid, {
-              ...account,
-              time: account.time + 1
-            });
-          } catch (error) {
+            if (!account) {
+              clearInterval(intervalId);
+              return;
+            }
+            Utils.account.set(userid, { ...account, time: account.time + 1 });
+          } catch (err) {
             clearInterval(intervalId);
-            return;
           }
         }, 1000);
       } catch (error) {
         reject(error);
         return;
       }
-      api.setOptions({
-        listenEvents: config[0].fcaOption.listenEvents,
-        logLevel: config[0].fcaOption.logLevel,
-        updatePresence: config[0].fcaOption.updatePresence,
-        selfListen: config[0].fcaOption.selfListen,
-        forceLogin: config[0].fcaOption.forceLogin,
-        online: config[0].fcaOption.online,
-        autoMarkDelivery: config[0].fcaOption.autoMarkDelivery,
-        autoMarkRead: config[0].fcaOption.autoMarkRead,
-      });
+
       try {
-        var listenEmitter = api.listenMqtt(async (error, event) => {
-          if (error) {
-            if (error === 'Connection closed.') {
-              console.error(`Error during API listen: ${error}`, userid);
-            }
-            console.log(error)
-          }
-          let database = fs.existsSync('./data/database.json') ? JSON.parse(fs.readFileSync('./data/database.json', 'utf8')) : createDatabase();
-          let data = Array.isArray(database) ? database.find(item => Object.keys(item)[0] === event?.threadID) : {};
-          let adminIDS = data ? database : createThread(event.threadID, api);
-          let blacklist = (JSON.parse(fs.readFileSync('./data/history.json', 'utf-8')).find(blacklist => blacklist.userid === userid) || {}).blacklist || [];
-          let hasPrefix = (event.body && aliases((event.body || '')?.trim().toLowerCase().split(/ +/).shift())?.hasPrefix == false) ? '' : prefix;
-          let [command, ...args] = ((event.body || '').trim().toLowerCase().startsWith(hasPrefix?.toLowerCase()) ? (event.body || '').trim().substring(hasPrefix?.length).trim().split(/\s+/).map(arg => arg.trim()) : []);
-          if (hasPrefix && aliases(command)?.hasPrefix === false) {
-            api.sendMessage(`Invalid usage this command doesn't need a prefix`, event.threadID, event.messageID);
-            return;
-          }
-          if (event.body && aliases(command)?.name) {
-            const isDevOnly = aliases(command)?.dev;
-            if (isDevOnly) {
-              if (!dev.includes(event.senderID)) {
-                return api.sendMessage("You dont have access to this command, you need to be a developer.", event.threadID, event.messageID)
-              }
-            }
-            const role = aliases(command)?.role ?? 0;
-            const isAdmin = config?.[0]?.masterKey?.admin?.includes(event.senderID) || admin.includes(event.senderID);
-            const isThreadAdmin = isAdmin || ((Array.isArray(adminIDS) ? adminIDS.find(admin => Object.keys(admin)[0] === event.threadID) : {})?.[event.threadID] || []).some(admin => admin.id === event.senderID);
-            if ((role == 1 && !isAdmin) || (role == 2 && !isThreadAdmin) || (role == 3 && !config?.[0]?.masterKey?.admin?.includes(event.senderID))) {
-              api.sendMessage(`You don't have permission to use this command.`, event.threadID, event.messageID);
+        api.setOptions({
+          listenEvents: config[0]?.fcaOption?.listenEvents ?? true,
+          logLevel: config[0]?.fcaOption?.logLevel ?? 'silent',
+          updatePresence: config[0]?.fcaOption?.updatePresence ?? true,
+          selfListen: config[0]?.fcaOption?.selfListen ?? true,
+          forceLogin: config[0]?.fcaOption?.forceLogin ?? true,
+          online: config[0]?.fcaOption?.online ?? true,
+          autoMarkDelivery: config[0]?.fcaOption?.autoMarkDelivery ?? false,
+          autoMarkRead: config[0]?.fcaOption?.autoMarkRead ?? false,
+        });
+      } catch (err) {
+        console.error(chalk.red(`Hindi ma-set ang API options: ${err.message}`));
+      }
+
+      try {
+        api.listenMqtt(async (error, event) => {
+          // BUONG event handler ay naka-wrap sa try/catch — kahit may
+          // mag-error sa isang command o handleEvent, hindi babagsak ang
+          // buong listener at tuloy pa rin ang pagtanggap ng susunod na message.
+          try {
+            if (error) {
+              console.log(chalk.red('[listenMqtt error]'), error);
               return;
             }
-          }
-          if (event.body && event.body?.toLowerCase().startsWith(prefix.toLowerCase()) && aliases(command)?.name) {
-            if (blacklist.includes(event.senderID)) {
-              api.sendMessage("We're sorry, but you've been banned from using bot. If you believe this is a mistake or would like to appeal, please contact one of the bot admins for further assistance.", event.threadID, event.messageID);
-              return;
-            }
-          }
-          if (event.body && aliases(command)?.name) {
-            const now = Date.now();
-            const name = aliases(command)?.name;
-            const sender = Utils.cooldowns.get(`${event.senderID}_${name}_${userid}`);
-            const delay = aliases(command)?.cooldown ?? 0;
-            if (!sender || (now - sender.timestamp) >= delay * 1000) {
-              Utils.cooldowns.set(`${event.senderID}_${name}_${userid}`, {
-                timestamp: now,
-                command: name
-              });
-            } else {
-              const active = Math.ceil((sender.timestamp + delay * 1000 - now) / 1000);
-              api.sendMessage(`Please wait ${active} seconds before using the "${name}" command again.`, event.threadID, event.messageID);
-              return;
-            }
-          }
-          if (event.body && !command && event.body?.toLowerCase().startsWith(prefix.toLowerCase())) {
-            api.sendMessage(`Invalid command please use ${prefix}help to see the list of available commands.`, event.threadID, event.messageID);
-            return;
-          }
-          if (event.body && command && prefix && event.body?.toLowerCase().startsWith(prefix.toLowerCase()) && !aliases(command)?.name) {
-            api.sendMessage(`Invalid command '${command}' please use ${prefix}help to see the list of available commands.`, event.threadID, event.messageID);
-            return;
-          }
-          for (const {
-              handleEvent,
-              name
-            }
-            of Utils.handleEvent.values()) {
-            if (handleEvent && name && (
-                (enableCommands[1].handleEvent || []).includes(name) || (enableCommands[0].commands || []).includes(name))) {
-              handleEvent({
-                api,
-                event,
-                enableCommands,
-                admin,
-                prefix,
-                blacklist
+            if (!event) return;
+
+            const threadID = event.threadID;
+            const senderID = event.senderID;
+
+            const database = safeReadJSON('./data/database.json', []);
+            let data = Array.isArray(database) ? database.find((item) => Object.keys(item)[0] === threadID) : null;
+            let adminIDS = database;
+            if (!data && threadID) {
+              adminIDS = await createThread(threadID, api).catch((err) => {
+                console.error(chalk.red(`Hindi ma-create ang thread record: ${err.message}`));
+                return database;
               });
             }
-          }
-          switch (event.type) {
-            case 'message':
-            case 'message_reply':
-            case 'message_unsend':
-            case 'message_reaction':
-              if (enableCommands[0].commands.includes(aliases(command?.toLowerCase())?.name)) {
-                await ((aliases(command?.toLowerCase())?.run || (() => {}))({
-                  api,
-                  event,
-                  args,
-                  enableCommands,
-                  admin,
-                  prefix,
-                  blacklist,
-                  Utils,
-                }));
+
+            const history = safeReadJSON('./data/history.json', []);
+            const blacklist = (Array.isArray(history) ? history.find((b) => b.userid === userid) : null)?.blacklist || [];
+
+            const body = event.body || '';
+            const hasPrefix = (body && aliases(body.trim().toLowerCase().split(/ +/).shift())?.hasPrefix === false) ? '' : prefix;
+            const [command, ...args] = (body.trim().toLowerCase().startsWith((hasPrefix || '').toLowerCase())
+              ? body.trim().substring((hasPrefix || '').length).trim().split(/\s+/).map((a) => a.trim())
+              : []);
+
+            if (hasPrefix && aliases(command)?.hasPrefix === false) {
+              safeSend(api, "Invalid usage this command doesn't need a prefix", threadID, event.messageID);
+              return;
+            }
+
+            if (body && aliases(command)?.name) {
+              const isDevOnly = aliases(command)?.dev;
+              if (isDevOnly && !dev.includes(senderID)) {
+                safeSend(api, 'You dont have access to this command, you need to be a developer.', threadID, event.messageID);
+                return;
               }
-              break;
+
+              const role = aliases(command)?.role ?? 0;
+              const isAdmin = config?.[0]?.masterKey?.admin?.includes(senderID) || admin.includes(senderID);
+              const isThreadAdmin = isAdmin || ((Array.isArray(adminIDS) ? adminIDS.find((a) => Object.keys(a)[0] === threadID) : null)?.[threadID] || [])
+                .some((a) => a.id === senderID);
+
+              if ((role == 1 && !isAdmin) || (role == 2 && !isThreadAdmin) || (role == 3 && !config?.[0]?.masterKey?.admin?.includes(senderID))) {
+                safeSend(api, "You don't have permission to use this command.", threadID, event.messageID);
+                return;
+              }
+            }
+
+            if (body && body.toLowerCase().startsWith((prefix || '').toLowerCase()) && aliases(command)?.name) {
+              if (blacklist.includes(senderID)) {
+                safeSend(api, "We're sorry, but you've been banned from using bot. If you believe this is a mistake or would like to appeal, please contact one of the bot admins for further assistance.", threadID, event.messageID);
+                return;
+              }
+            }
+
+            if (body && aliases(command)?.name) {
+              const now = Date.now();
+              const name = aliases(command)?.name;
+              const sender = Utils.cooldowns.get(`${senderID}_${name}_${userid}`);
+              const delay = aliases(command)?.cooldown ?? 0;
+              if (!sender || (now - sender.timestamp) >= delay * 1000) {
+                Utils.cooldowns.set(`${senderID}_${name}_${userid}`, { timestamp: now, command: name });
+              } else {
+                const active = Math.ceil((sender.timestamp + delay * 1000 - now) / 1000);
+                safeSend(api, `Please wait ${active} seconds before using the "${name}" command again.`, threadID, event.messageID);
+                return;
+              }
+            }
+
+            if (body && !command && prefix && body.toLowerCase().startsWith(prefix.toLowerCase())) {
+              safeSend(api, `Invalid command please use ${prefix}help to see the list of available commands.`, threadID, event.messageID);
+              return;
+            }
+
+            if (body && command && prefix && body.toLowerCase().startsWith(prefix.toLowerCase()) && !aliases(command)?.name) {
+              safeSend(api, `Invalid command '${command}' please use ${prefix}help to see the list of available commands.`, threadID, event.messageID);
+              return;
+            }
+
+            // Bawat handleEvent ay naka-try/catch nang hiwalay — kahit may
+            // isang masirang handleEvent, tuloy pa rin ang ibang naka-register.
+            for (const { handleEvent, name } of Utils.handleEvent.values()) {
+              if (handleEvent && name && ((enableCommands[1].handleEvent || []).includes(name) || (enableCommands[0].commands || []).includes(name))) {
+                try {
+                  handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
+                } catch (err) {
+                  console.error(chalk.red(`Error sa handleEvent '${name}': ${err.message}`));
+                }
+              }
+            }
+
+            switch (event.type) {
+              case 'message':
+              case 'message_reply':
+              case 'message_unsend':
+              case 'message_reaction': {
+                const matched = aliases(command?.toLowerCase());
+                if (matched && enableCommands[0].commands.includes(matched.name)) {
+                  try {
+                    await (matched.run || (() => {}))({
+                      api, event, args, enableCommands, admin, prefix, blacklist, Utils,
+                    });
+                  } catch (err) {
+                    console.error(chalk.red(`Error sa command '${matched.name}': ${err.message}`));
+                  }
+                }
+                break;
+              }
+              default:
+                break;
+            }
+          } catch (outerErr) {
+            console.error(chalk.red('[listenMqtt handler error]'), outerErr);
           }
         });
       } catch (error) {
-        console.error('Error during API listen, outside of listen', userid);
+        console.error(chalk.red(`Error during API listen, outside of listen (${userid}): ${error.message}`));
         Utils.account.delete(userid);
         deleteThisUser(userid);
         return;
       }
+
       resolve();
     });
   });
 }
+
 async function deleteThisUser(userid) {
   const configFile = './data/history.json';
-  let config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+  const history = safeReadJSON(configFile, []);
   const sessionFile = path.join('./data/session', `${userid}.json`);
-  const index = config.findIndex(item => item.userid === userid);
-  if (index !== -1) config.splice(index, 1);
-  fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
+  const index = history.findIndex((item) => item.userid === userid);
+  if (index !== -1) history.splice(index, 1);
+  safeWriteJSON(configFile, history);
   try {
-    fs.unlinkSync(sessionFile);
+    if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
   } catch (error) {
-    console.log(error);
+    console.error(chalk.red(`Hindi matanggal ang session file: ${error.message}`));
   }
 }
+
 async function addThisUser(userid, enableCommands, state, prefix, admin, blacklist) {
   const configFile = './data/history.json';
   const sessionFolder = './data/session';
   const sessionFile = path.join(sessionFolder, `${userid}.json`);
   if (fs.existsSync(sessionFile)) return;
-  const config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
-  config.push({
+
+  const history = safeReadJSON(configFile, []);
+  history.push({
     userid,
-    prefix: prefix || "",
+    prefix: prefix || '',
     admin: admin || [],
     blacklist: blacklist || [],
     enableCommands,
     time: 0,
   });
-  fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
-  fs.writeFileSync(sessionFile, JSON.stringify(state));
+  safeWriteJSON(configFile, history);
+  try {
+    fs.writeFileSync(sessionFile, JSON.stringify(state));
+  } catch (err) {
+    console.error(chalk.red(`Hindi maisulat ang session file: ${err.message}`));
+  }
 }
 
 function aliases(command) {
-  const aliases = Array.from(Utils.commands.entries()).find(([commands]) => commands.includes(command?.toLowerCase()));
-  if (aliases) {
-    return aliases[1];
-  }
-  return null;
+  if (!command) return null;
+  const found = Array.from(Utils.commands.entries()).find(([commands]) => commands.includes(command.toLowerCase()));
+  return found ? found[1] : null;
 }
+
 async function main() {
-  const empty = require('fs-extra');
-  const cacheFile = './script/cache';
-  if (!fs.existsSync(cacheFile)) fs.mkdirSync(cacheFile);
-  const configFile = './data/history.json';
-  if (!fs.existsSync(configFile)) fs.writeFileSync(configFile, '[]', 'utf-8');
-  const config = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
-  const sessionFolder = path.join('./data/session');
-  if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder);
-  const adminOfConfig = fs.existsSync('./data') && fs.existsSync('./data/config.json') ? JSON.parse(fs.readFileSync('./data/config.json', 'utf8')) : createConfig();
-  cron.schedule(`*/${adminOfConfig[0].masterKey.restartTime} * * * *`, async () => {
-    const history = JSON.parse(fs.readFileSync('./data/history.json', 'utf-8'));
-    history.forEach(user => {
-      (!user || typeof user !== 'object') ? process.exit(1): null;
-      (user.time === undefined || user.time === null || isNaN(user.time)) ? process.exit(1): null;
-      const update = Utils.account.get(user.userid);
-      update ? user.time = update.time : null;
-    });
-    await empty.emptyDir(cacheFile);
-    await fs.writeFileSync('./data/history.json', JSON.stringify(history, null, 2));
-    process.exit(1);
-  });
   try {
+    const empty = require('fs-extra');
+    const cacheFile = './script/cache';
+    if (!fs.existsSync(cacheFile)) fs.mkdirSync(cacheFile, { recursive: true });
+
+    const configFile = './data/history.json';
+    if (!fs.existsSync(configFile)) fs.writeFileSync(configFile, '[]', 'utf-8');
+    const history = safeReadJSON(configFile, []);
+
+    const sessionFolder = path.join('./data/session');
+    if (!fs.existsSync(sessionFolder)) fs.mkdirSync(sessionFolder, { recursive: true });
+
+    const adminOfConfig = fs.existsSync('./data') && fs.existsSync('./data/config.json')
+      ? safeReadJSON('./data/config.json', null) || createConfig()
+      : createConfig();
+
+    const restartTime = adminOfConfig?.[0]?.masterKey?.restartTime || 15;
+    cron.schedule(`*/${restartTime} * * * *`, async () => {
+      try {
+        const currentHistory = safeReadJSON('./data/history.json', []);
+        currentHistory.forEach((user) => {
+          if (!user || typeof user !== 'object') return;
+          if (user.time === undefined || user.time === null || isNaN(user.time)) user.time = 0;
+          const update = Utils.account.get(user.userid);
+          if (update) user.time = update.time;
+        });
+        await empty.emptyDir(cacheFile);
+        safeWriteJSON('./data/history.json', currentHistory);
+      } catch (err) {
+        console.error(chalk.red(`Error sa scheduled restart cleanup: ${err.message}`));
+      } finally {
+        process.exit(1);
+      }
+    });
+
     for (const file of fs.readdirSync(sessionFolder)) {
       const filePath = path.join(sessionFolder, file);
       try {
-        const {
-          enableCommands,
-          prefix,
-          admin,
-          blacklist
-        } = config.find(item => item.userid === path.parse(file).name) || {};
-        const state = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        if (enableCommands) await accountLogin(state, enableCommands, prefix, admin, blacklist);
+        const record = history.find((item) => item.userid === path.parse(file).name) || {};
+        const { enableCommands, prefix, admin, blacklist } = record;
+        const state = safeReadJSON(filePath, null);
+        if (enableCommands && state) {
+          await accountLogin(state, enableCommands, prefix, admin, blacklist);
+        }
       } catch (error) {
+        console.error(chalk.red(`Hindi ma-relogin ang session ${file}: ${error.message}`));
         deleteThisUser(path.parse(file).name);
       }
     }
-  } catch (error) {}
+  } catch (err) {
+    console.error(chalk.red(`Fatal error sa main(): ${err.message}`));
+  }
 }
 
 function createConfig() {
-  const config = [{
+  const cfg = [{
     masterKey: {
       admin: [],
       devMode: false,
@@ -484,45 +534,43 @@ function createConfig() {
     fcaOption: {
       forceLogin: true,
       listenEvents: true,
-      logLevel: "silent",
+      logLevel: 'silent',
       updatePresence: true,
       selfListen: true,
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64",
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       online: true,
       autoMarkDelivery: false,
-      autoMarkRead: false
-    }
+      autoMarkRead: false,
+    },
   }];
   const dataFolder = './data';
-  if (!fs.existsSync(dataFolder)) fs.mkdirSync(dataFolder);
-  fs.writeFileSync('./data/config.json', JSON.stringify(config, null, 2));
-  return config;
+  if (!fs.existsSync(dataFolder)) fs.mkdirSync(dataFolder, { recursive: true });
+  safeWriteJSON('./data/config.json', cfg);
+  return cfg;
 }
+
 async function createThread(threadID, api) {
   try {
-    const database = JSON.parse(fs.readFileSync('./data/database.json', 'utf8'));
-    let threadInfo = await api.getThreadInfo(threadID);
-    let adminIDs = threadInfo ? threadInfo.adminIDs : [];
+    const database = safeReadJSON('./data/database.json', []);
+    const threadInfo = await api.getThreadInfo(threadID);
+    const adminIDs = threadInfo ? threadInfo.adminIDs : [];
     const data = {};
-    data[threadID] = adminIDs
+    data[threadID] = adminIDs;
     database.push(data);
-    await fs.writeFileSync('./data/database.json', JSON.stringify(database, null, 2), 'utf-8');
+    safeWriteJSON('./data/database.json', database);
     return database;
   } catch (error) {
-    console.log(error);
+    console.error(chalk.red(`Hindi makuha ang thread info para sa ${threadID}: ${error.message}`));
+    return safeReadJSON('./data/database.json', []);
   }
 }
-async function createDatabase() {
-  const data = './data';
-  const database = './data/database.json';
-  if (!fs.existsSync(data)) {
-    fs.mkdirSync(data, {
-      recursive: true
-    });
-  }
-  if (!fs.existsSync(database)) {
-    fs.writeFileSync(database, JSON.stringify([]));
-  }
-  return database;
+
+function createDatabase() {
+  const dataFolder = './data';
+  const databaseFile = './data/database.json';
+  if (!fs.existsSync(dataFolder)) fs.mkdirSync(dataFolder, { recursive: true });
+  if (!fs.existsSync(databaseFile)) fs.writeFileSync(databaseFile, JSON.stringify([]));
+  return databaseFile;
 }
-main()
+
+main();
