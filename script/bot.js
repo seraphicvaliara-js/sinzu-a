@@ -3,12 +3,12 @@ const path = require("path");
 
 module.exports.config = {
   name: "bot",
-  version: "3.1.0",
+  version: "3.0.0",
   hasPermission: 0,
   credits: "you",
-  description: "Admin-only: /bot on para buksan ang auto-reply, /bot off para patayin.",
+  description: "Admin-only: /bot on — bubuksan ang bot dito at mag-aauto-reply na ng generic lines sa lahat ng messages. Wala nang 'off' — sa pagkakataong ma-on, permanente na itong tatakbo hanggang manually mo itong tanggalin sa data file.",
   commandCategory: "admin",
-  usages: "[on/off]",
+  usages: "[on]",
   cooldowns: 3,
 };
 
@@ -38,7 +38,7 @@ function saveSet(file, set) {
 
 let botAutoReplyThreads = loadSet(AUTOREPLY_DATA_FILE);
 
-// Auto-reply lines na pinili mo
+// Updated auto-reply lines
 const genericReplies = [
   "WAGMUKO DAGANAN HUY BALYENA YARN",
   "PWEDE MATULOG BASTA MAGTYPE KA AHAHAHA",
@@ -91,7 +91,9 @@ module.exports.run = async function ({ api, event, args }) {
   const option = args[0] ? args[0].toLowerCase() : null;
   const prefix = global.config?.PREFIX || "/";
 
-  // Bot admin-only check — kung hindi kasama sa adminBot, ignore lang
+  // Bot admin-only — IDs galing sa global.config.adminBot (nilalagay sa
+  // dashboard/config). Kung hindi bot admin ang nagsend, tahimik lang na
+  // ia-ignore ang command — walang sasabihing anuman.
   const adminBot = global.config?.adminBot || [];
   if (!adminBot.includes(senderID)) return;
 
@@ -100,25 +102,14 @@ module.exports.run = async function ({ api, event, args }) {
     saveSet(AUTOREPLY_DATA_FILE, botAutoReplyThreads);
 
     return api.sendMessage(
-      "🟢 Naka-ON na ang bot dito — nag-aauto-reply na sa lahat ng papasok na message.",
-      threadID,
-      messageID
-    );
-  }
-
-  if (option === "off") {
-    botAutoReplyThreads.delete(threadID);
-    saveSet(AUTOREPLY_DATA_FILE, botAutoReplyThreads);
-
-    return api.sendMessage(
-      "🔴 Naka-OFF na ang bot dito — itinigil na ang auto-reply.",
+      "🟢 Naka-ON na ang bot dito — mag-aauto-reply na sa lahat ng papasok na message.",
       threadID,
       messageID
     );
   }
 
   return api.sendMessage(
-    `Usage: ${prefix}bot on / ${prefix}bot off`,
+    `Usage: ${prefix}bot on`,
     threadID,
     messageID
   );
@@ -133,7 +124,8 @@ module.exports.handleEvent = function ({ api, event }) {
 
   const randomReply = getRandomGenericReply(threadID);
 
-  // Safe mabilis na interval (500ms–1000ms)
+  // Safe mabilis na interval (500ms–1000ms): mabilis sumagot per message
+  // pero hindi agad naha-catch ng FB spam filter.
   const safeFastDelay = 500 + Math.floor(Math.random() * 500);
 
   setTimeout(() => {
