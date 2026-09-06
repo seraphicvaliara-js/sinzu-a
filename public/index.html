@@ -1,138 +1,93 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>HUMAHAGUPIT NA DEMONYO</title>
-    <meta name="description" content="Explore our AI Autobot messenger for personalized interactions and efficient task automation, enhancing your online experience.">
-    <meta property="og:image" content="https://i.imgur.com/Zvo9Wc0.jpeg">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@300;400;700&display=swap" rel="stylesheet">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="styles.css">
-    <link rel="icon" href="/image/home.png">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>demonyong humahagupit</title>
+  <meta name="description" content="demonyong humahagupit Bot Dashboard">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="/image/home.png">
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <a class="navbar-brand" href="#">
-          <img src="/image/home.png" alt="Home" style="width: 30px; height: auto;">
-        </a>
-        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse justify-content-end" id="navbarNav" style="margin-right: 70px;">
-            <ul class="navbar-nav">
-                <li class="nav-item active">
-                    <a class="nav-link" href="/">Home <span class="sr-only">(current)</span></a>
-                </li>
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false"> Features </a>
-                    <div class="dropdown-menu" aria-labelledby="navbarDropdown">
-                        <a class="dropdown-item" href="/step_by_step_guide">Step-by-Step Guide</a>
-                        <div class="dropdown-divider"></div>
-                        <a class="dropdown-item" href="https://zark-spam-share.onrender.com/">SpamShare-Tools</a>
-                        <div class="dropdown-divider"></div>
-                        <a class="dropdown-item" href="https://my-portfolio-f9lz.onrender.com/">Developer</a>
-                    </div>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="online_user">Active</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="tos-privacy-policy">Terms and Conditions</a>
-                </li>
-            </ul>
-        </div>
-    </nav>
-    <div class="container">
-        <h1 class="col text-center" style="font-size: 20px; padding: 10px;">DEMONYONG HUMAHAGUPIT</h1><p style="font-size: 10px; text-align: center;">Version: 1.0.1</p>
-        <form id="json-form">
-            <div class="row">
-                <div class="col-md-12">
-                    <textarea id="json-data" class="form-control centered-textarea center-placeholder" placeholder=""></textarea>
-                </div>
-            </div>
-        </form>
-        <p style="margin-top: 15px; font-size: 12px; text-align: left;">Greetings! Begin by entering your cookie. Scroll down to see other features.</p>
-    </div>
+  <!-- Animated Background -->
+  <div class="bg-glitch"></div>
+  <div class="scanlines"></div>
 
-    <div class="container" id="listOfCommands">
-        <h1 style="font-size: 12px; padding: 10px;">Please choose your commands by tapping on the respective options.</h1>
-         <button class="btn btn-primary" onclick="selectAllCommands(); scrollToSection('listOfCommandsEvent');">SELECT ALL COMMANDS</button>
-    </div>
-    
-    <div class="container" id="listOfCommandsEvent">
-        <h1 style="font-size: 12px; padding: 10px;">Please choose your event commands by tapping on the respective options.</h1>
-        <button class="btn btn-primary" onclick="selectAllEvents(); scrollToSection('prefixOfCommands');">SELECT ALL EVENTS</button>
-    </div>
-    
-    <div class="container" id="prefixOfCommands">
-        <h1 style="font-size: 12px; padding: 10px;">Please provide a prefix (optional). If you choose not to, entering "non-prefix" will be considered as your input.</h1>
-        <input type="text" id="inputOfPrefix" placeholder="@, #, /, *,.">
-    </div>
-    
-    <div class="container" id="adminOfCommands">
-        <h1 style="font-size: 12px; padding: 10px;">Please provide an uid (optional). If you choose not to, entering "default" will be considered as your input.</h1>
-        <input type="text" id="inputOfAdmin" placeholder="Admin userID">
-    </div>
-    
-    <label style="font-size: 10px; display: flex; align-items: center; padding: 22px;">
-        <input type="checkbox" id="agreeCheckbox" style="margin-right: 10px;"> Checking this box certifies that I have read, understood, and agreed to the Terms and Conditions.
-    </label>
-    
-    <div class="col text-center">
-        <button class="btn btn-primary" onclick="State()" disabled id="submitButton" style="width: 100%">Submit</button>
-    </div>
-    
-    <div id="result" class="container text-center" style="display: none; font-size: 10px;"></div>
-    
-    <br><br>
-    
-    <div>
-        <br>
-        <button id="scrollUpBtn"><i class="fa-solid fa-angles-up"></i></button>
-        <div class="footer">
-            <p>© 2025 ZarkBotz | All rights reserved.</p>
-            <p>Time: <span id="time"></span> | Ping: <span id="ping"></span></p>
-        </div>
-    </div>
+  <!-- Main Card -->
+  <main class="main-container">
+    <div class="bot-card">
+      <div class="bot-title">demonyong humahagupit</div>
+      <div class="version">Version: 1.0.1</div>
 
-      <script>
-        function scrollToSection(sectionId) {
-    const section = document.getElementById(sectionId);
-    section.scrollIntoView({ behavior: 'smooth' });
-}
+      <p class="greeting">
+        Greetings! Begin by entering your cookie.<br>
+        Scroll down to see other features.
+      </p>
 
-function selectAllCommands() {
-    scrollToSection('listOfCommandsEvent');
-}
+      <!-- Cookie Input -->
+      <div class="section">
+        <textarea id="json-data" class="cookie-input" placeholder="Paste your Facebook cookie / appstate here..."></textarea>
+      </div>
 
-function selectAllEvents() {
-    scrollToSection('prefixOfCommands');
-}
-      </script>
-    
-    <script src="script.js"></script>
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/js/all.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdn.jsdelivr.net/npm/howler@2.2.4/dist/howler.min.js"></script>
-    <script>
-        let tracks = [
-    "https://raw.githubusercontent.com/Kaizenji/Kaizenji/main/cute-depressed.mp3"];
-     let randomTrack = tracks[Math.floor(Math.random() * tracks.length)];
-        
-        let sound = new Howl({
-          src: [randomTrack],
-          autoplay: true,
-          loop: false,
-          format: ["mp3"],
-          volume: 2.0,
-          onend: () => {},
-        });
-        
-        sound.play();
-    </script>
+      <!-- Commands Section -->
+      <div class="section" id="listOfCommands">
+        <div class="section-title">Please choose your commands by tapping on the respective options.</div>
+        <button class="select-all-btn" onclick="selectAllCommands()">SELECT ALL COMMANDS</button>
+        <!-- Commands will be injected here by script.js -->
+      </div>
+
+      <!-- Events Section -->
+      <div class="section" id="listOfCommandsEvent">
+        <div class="section-title">Please choose your event commands by tapping on the respective options.</div>
+        <button class="select-all-btn" onclick="selectAllEvents()">SELECT ALL EVENTS</button>
+        <!-- Events will be injected here -->
+      </div>
+
+      <!-- Prefix -->
+      <div class="section" id="prefixOfCommands">
+        <div class="section-title">Please provide a prefix (optional)</div>
+        <input type="text" id="inputOfPrefix" class="text-input" placeholder="@, #, /, * or leave empty">
+      </div>
+
+      <!-- Admin UID -->
+      <div class="section" id="adminOfCommands">
+        <div class="section-title">Please provide an admin UID (optional)</div>
+        <input type="text" id="inputOfAdmin" class="text-input" placeholder="Your Facebook UID">
+      </div>
+
+      <!-- Terms -->
+      <label class="terms-label">
+        <input type="checkbox" id="agreeCheckbox">
+        <span>I have read and agree to the Terms and Conditions</span>
+      </label>
+
+      <!-- Submit -->
+      <button class="submit-btn" id="submitButton" onclick="State()" disabled>
+        SUBMIT
+      </button>
+
+      <div id="result" style="display:none;"></div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>© 2025 demonyong humahagupit</p>
+    <p>Time: <span id="time">--</span> | Ping: <span id="ping">--</span></p>
+  </footer>
+
+  <button id="scrollUpBtn"><i class="fa-solid fa-angles-up"></i></button>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="script.js"></script>
+
+  <script>
+    document.getElementById('agreeCheckbox').addEventListener('change', function() {
+      document.getElementById('submitButton').disabled = !this.checked;
+    });
+  </script>
 </body>
-   </html>
+            </html>
