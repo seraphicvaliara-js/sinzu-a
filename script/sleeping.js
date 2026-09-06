@@ -3,16 +3,16 @@ const path = require("path");
 
 module.exports.config = {
   name: "sleeping",
-  version: "4.1.0",
-  role: 0, // role check dito ay 0 dahil ginagamit na ang sariling ADMIN_UIDS list sa baba
+  version: "4.2.0",
+  role: 0,
   aliases: [],
   credits: "you",
-  description: "Toggle sleeping mode autoreply on/off — random street/rap-vibe na reply sa bawat message.",
+  description: "Toggle sleeping mode autoreply on/off — random street/rap-vibe na reply sa bawat message. Admin only.",
   usage: "[on/off] [thread id]",
   cooldown: 3,
 };
 
-// Persistent storage — naka-save sa JSON file, hindi mawawala kahit mag-restart
+// Persistent storage
 const DATA_FILE = path.join(__dirname, "sleeping_data.json");
 
 function loadThreads() {
@@ -37,7 +37,7 @@ function saveThreads(threadsSet) {
 
 let sleepingThreads = loadThreads();
 
-// Orihinal na mga linya — playful teasing/roast style, hindi personal attack
+// Random replies (marami na)
 const sleepingReplies = [
   "Wow, another life-changing message. Truly.",
   "Did you type that with your eyes closed?",
@@ -64,13 +64,38 @@ const sleepingReplies = [
   "You cooked... something. Not sure what though.",
   "Someone give this person a filter, please.",
   "That energy is unmatched, unfortunately.",
+  "Bro really woke up and chose violence... against grammar.",
+  "That message just failed the vibe check hard.",
+  "I'm not mad, I'm just disappointed. And a little confused.",
+  "You typed that like the WiFi was about to die.",
+  "Main character syndrome is strong with this one.",
+  "Somewhere in the world, a brain cell just left the group chat.",
+  "That was the digital equivalent of tripping over air.",
+  "Respect the confidence. Question the execution.",
+  "You just dropped the conversational equivalent of a wet sock.",
+  "I'm gonna pretend I didn't see that for both our sakes.",
+  "That message needs a 'this is fine' dog meme.",
+  "You really said that out loud... digitally.",
+  "The audacity is loud and the logic is quiet.",
+  "Somewhere a therapist just got a new client.",
+  "That take was so cold it needs a jacket.",
+  "You typed like you were late for a meeting with chaos.",
+  "Not the worst thing I've read today, but it's trying.",
+  "This message has the same energy as a participation trophy.",
+  "You just speedran 'how to lose the plot'.",
+  "I'm impressed you managed to hit send with that much nonsense.",
+  "That was less of a message and more of a cry for help.",
+  "The group chat just collectively aged 5 years.",
+  "You cooked and still managed to burn the kitchen.",
+  "Somewhere, silence is begging to come back.",
+  "That energy belongs in a deleted scene.",
+  "You really thought that was the one, huh?",
+  "I'm not saying it was bad... but the floor is lava and you're standing on it.",
+  "That message just asked for a refund on common sense.",
+  "Bold strategy. Let's see if it pays off. (It won't.)",
+  "You just invented a new way to waste pixels.",
 ];
 
-// Ilagay dito ang Facebook UID ng mga admin na pwedeng gumamit ng command na ito.
-// Halimbawa: ["100012345678901", "100098765432109"]
-const ADMIN_UIDS = [
-  "PALITAN_MO_ITO_NG_UID_MO",
-];
 const lastReplyByThread = new Map();
 
 function getRandomReply(threadID) {
@@ -83,16 +108,31 @@ function getRandomReply(threadID) {
   return reply;
 }
 
-module.exports.run = async function ({ api, event, args }) {
-  const { threadID, messageID, senderID } = event;
-  const prefix = global.config?.PREFIX || "/";
+// Check kung admin (mula sa dashboard / session)
+function isAdmin(senderID, adminList = []) {
+  if (!senderID) return false;
 
-  // Kung wala sa ADMIN_UIDS list ang nag-command, ignore lang — walang reply.
-  if (!ADMIN_UIDS.includes(senderID)) return;
+  if (Array.isArray(adminList) && adminList.includes(senderID)) {
+    return true;
+  }
+
+  try {
+    if (global.config?.[0]?.masterKey?.admin?.includes(senderID)) {
+      return true;
+    }
+  } catch (e) {}
+
+  return false;
+}
+
+module.exports.run = async function ({ api, event, args, admin, prefix }) {
+  const { threadID, messageID, senderID } = event;
+  const usedPrefix = prefix || global.config?.PREFIX || "/";
+
+  // Strict admin only — kung hindi admin, ignore completely
+  if (!isAdmin(senderID, admin)) return;
 
   const option = args[0] ? args[0].toLowerCase() : null;
-  // Optional na 2nd argument: ibang thread ID na gustong i-toggle.
-  // Kung wala, gagamitin ang thread kung saan tina-type ang command.
   const targetThreadID = args[1] ? args[1].trim() : threadID;
 
   try {
@@ -100,7 +140,7 @@ module.exports.run = async function ({ api, event, args }) {
       sleepingThreads.add(targetThreadID);
       saveThreads(sleepingThreads);
       return api.sendMessage(
-        `🥷 Naka-ON na ang sleeping mode sa thread ${targetThreadID}, permanente hangga't hindi mo in-off.`,
+        `🥷 Naka-ON na ang sleeping mode sa thread ${targetThreadID}.\n(Permanente hanggang i-off mo)`,
         threadID,
         messageID
       );
@@ -109,11 +149,15 @@ module.exports.run = async function ({ api, event, args }) {
     if (option === "off") {
       sleepingThreads.delete(targetThreadID);
       saveThreads(sleepingThreads);
-      return api.sendMessage(`🌙 Naka-OFF na ang sleeping mode sa thread ${targetThreadID}.`, threadID, messageID);
+      return api.sendMessage(
+        `🌙 Naka-OFF na ang sleeping mode sa thread ${targetThreadID}.`,
+        threadID,
+        messageID
+      );
     }
 
     return api.sendMessage(
-      `Gamitin: ${prefix}sleeping on [thread id] | ${prefix}sleeping off [thread id]\n(kung walang thread id, gagamitin ang kasalukuyang thread)`,
+      `Gamitin:\n\( {usedPrefix}sleeping on [thread id]\n \){usedPrefix}sleeping off [thread id]\n\n(Kung walang thread id, gagamitin ang current thread)`,
       threadID,
       messageID
     );
@@ -122,8 +166,6 @@ module.exports.run = async function ({ api, event, args }) {
   }
 };
 
-// Fire-and-forget, pero may .catch para hindi mag-unhandled rejection
-// kahit sabay-sabay o sunod-sunod na magmessage ang mga tao sa GC.
 module.exports.handleEvent = function ({ api, event }) {
   try {
     const { threadID, senderID, body } = event;
