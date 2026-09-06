@@ -9,8 +9,7 @@ const script = path.join(__dirname, 'script');
 const cron = require('node-cron');
 
 // ---------------------------------------------------------------------------
-// Safe JSON helpers — bawat pagbasa/pagsulat ng JSON ay naka-guard na para
-// hindi bumagsak ang buong bot kung masira/mag-corrupt ang isang data file.
+// Safe JSON helpers
 // ---------------------------------------------------------------------------
 function safeReadJSON(filePath, fallback) {
   try {
@@ -34,46 +33,62 @@ function safeWriteJSON(filePath, data) {
   }
 }
 
-// Wrapper sa api.sendMessage para hindi mag-unhandled rejection at hindi
-// bumagsak ang listener kahit mabigo ang isang message.
+// ---------------------------------------------------------------------------
+// Safe Send + simple per-thread rate limit
+// ---------------------------------------------------------------------------
+const sendQueue = new Map(); // threadID -> lastSend timestamp
+
 function safeSend(api, message, threadID, messageID) {
+  if (!api || !threadID) return;
+
+  const now = Date.now();
+  const last = sendQueue.get(threadID) || 0;
+  const minDelay = 800; // minimum 800ms between messages sa same thread
+
+  if (now - last < minDelay) {
+    setTimeout(() => safeSend(api, message, threadID, messageID), minDelay - (now - last) + 50);
+    return;
+  }
+
+  sendQueue.set(threadID, now);
+
   try {
     const result = api.sendMessage(message, threadID, messageID);
     if (result && typeof result.catch === 'function') {
       result.catch((err) => {
-        console.error(chalk.red(`[safeSend] Hindi naipadala sa thread ${threadID}: ${err?.message || err}`));
+        console.error(chalk.red(`[safeSend] Hindi naipadala sa ${threadID}: ${err?.message || err}`));
       });
     }
     return result;
   } catch (err) {
-    console.error(chalk.red(`[safeSend] Error sa sendMessage: ${err.message}`));
+    console.error(chalk.red(`[safeSend] Exception: ${err.message}`));
   }
 }
 
+// ---------------------------------------------------------------------------
+// Config & Utils
+// ---------------------------------------------------------------------------
 const config = fs.existsSync('./data') && fs.existsSync('./data/config.json')
   ? safeReadJSON('./data/config.json', null) || createConfig()
   : createConfig();
 
 const dev = safeReadJSON('./dev.json', []);
 
-const Utils = new Object({
+const Utils = {
   commands: new Map(),
   handleEvent: new Map(),
   account: new Map(),
   cooldowns: new Map(),
-});
+};
 
-// Siguraduhing meron na ang ./data folder, history.json, at session folder
-// BAGO mag-load ng commands — dahil may commands (tulad ng active-session.js)
-// na nagbabasa/naghahanap ng history.json habang nilo-load pa lang sila.
+// Ensure folders exist early
 if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
 if (!fs.existsSync('./data/history.json')) fs.writeFileSync('./data/history.json', '[]', 'utf-8');
 if (!fs.existsSync('./data/session')) fs.mkdirSync('./data/session', { recursive: true });
 if (!fs.existsSync('./data/database.json')) fs.writeFileSync('./data/database.json', '[]', 'utf-8');
 
 // ---------------------------------------------------------------------------
-// Command/Event loader — try/catch na sa bawat file, kaya kahit may sirang
-// isang command file, tuloy pa rin ang pag-load ng iba.
+// Command loader
 // ---------------------------------------------------------------------------
 function registerModule(scriptPath, file) {
   try {
@@ -81,8 +96,16 @@ function registerModule(scriptPath, file) {
     if (!cfg) return;
 
     const {
-      name = [], role = '0', version = '1.0.0', hasPrefix = true, aliases = [],
-      description = '', usage = '', credits = '', cooldown = '5', dev: devOnly = false,
+      name = [],
+      role = '0',
+      version = '1.0.0',
+      hasPrefix = true,
+      aliases = [],
+      description = '',
+      usage = '',
+      credits = '',
+      cooldown = '5',
+      dev: devOnly = false,
     } = Object.fromEntries(Object.entries(cfg).map(([key, value]) => [key.toLowerCase(), value]));
 
     const finalAliases = Array.isArray(aliases) ? [...aliases] : [aliases];
@@ -129,6 +152,9 @@ try {
   console.error(chalk.red(`Hindi ma-load ang script folder: ${err.message}`));
 }
 
+// ---------------------------------------------------------------------------
+// Express routes
+// ---------------------------------------------------------------------------
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(bodyParser.json());
 app.use(express.json());
@@ -138,6 +164,7 @@ const routes = [
   { path: '/step_by_step_guide', file: 'guide.html' },
   { path: '/online_user', file: 'online.html' },
 ];
+
 routes.forEach((route) => {
   app.get(route.path, (req, res) => {
     try {
@@ -211,21 +238,25 @@ app.post('/login', async (req, res) => {
 
 const PORT = 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
+  console.log(chalk.green(`Server is running at http://localhost:${PORT}`));
 });
 
+// ---------------------------------------------------------------------------
+// Global error handlers (hindi agad mag-crash)
+// ---------------------------------------------------------------------------
 process.on('unhandledRejection', (reason) => {
   console.error(chalk.red('Unhandled Promise Rejection:'), reason);
 });
+
 process.on('uncaughtException', (error) => {
   console.error(chalk.red('Uncaught Exception:'), error);
-  // Hindi natin ito ipapa-crash agad — nilo-log lang para malaman ang cause,
-  // pero ang cron restart pa rin ang bahala sa scheduled na pag-restart.
+  // Hayaan ang watchdog (index.js) ang mag-decide kung kailangan i-restart
 });
 
+// ---------------------------------------------------------------------------
+// Account Login + robust MQTT listener
+// ---------------------------------------------------------------------------
 async function accountLogin(state, enableCommands = [], prefix, admin = []) {
-  // Palaging i-enable LAHAT ng na-load na commands/events sa halip na
-  // umasa sa listahan na galing sa login form.
   enableCommands = [
     { commands: Array.from(Utils.commands.values()).map((c) => c.name) },
     { handleEvent: Array.from(Utils.handleEvent.values()).map((c) => c.name) },
@@ -289,142 +320,169 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
         console.error(chalk.red(`Hindi ma-set ang API options: ${err.message}`));
       }
 
-      try {
-        api.listenMqtt(async (error, event) => {
-          // BUONG event handler ay naka-wrap sa try/catch — kahit may
-          // mag-error sa isang command o handleEvent, hindi babagsak ang
-          // buong listener at tuloy pa rin ang pagtanggap ng susunod na message.
-          try {
-            if (error) {
-              console.log(chalk.red('[listenMqtt error]'), error);
-              return;
-            }
-            if (!event) return;
-
-            const threadID = event.threadID;
-            const senderID = event.senderID;
-
-            const database = safeReadJSON('./data/database.json', []);
-            let data = Array.isArray(database) ? database.find((item) => Object.keys(item)[0] === threadID) : null;
-            let adminIDS = database;
-            if (!data && threadID) {
-              adminIDS = await createThread(threadID, api).catch((err) => {
-                console.error(chalk.red(`Hindi ma-create ang thread record: ${err.message}`));
-                return database;
-              });
-            }
-
-            const history = safeReadJSON('./data/history.json', []);
-            const blacklist = (Array.isArray(history) ? history.find((b) => b.userid === userid) : null)?.blacklist || [];
-
-            const body = event.body || '';
-            const hasPrefix = (body && aliases(body.trim().toLowerCase().split(/ +/).shift())?.hasPrefix === false) ? '' : prefix;
-            const [command, ...args] = (body.trim().toLowerCase().startsWith((hasPrefix || '').toLowerCase())
-              ? body.trim().substring((hasPrefix || '').length).trim().split(/\s+/).map((a) => a.trim())
-              : []);
-
-            if (hasPrefix && aliases(command)?.hasPrefix === false) {
-              safeSend(api, "Invalid usage this command doesn't need a prefix", threadID, event.messageID);
-              return;
-            }
-
-            if (body && aliases(command)?.name) {
-              const isDevOnly = aliases(command)?.dev;
-              if (isDevOnly && !dev.includes(senderID)) {
-                safeSend(api, 'You dont have access to this command, you need to be a developer.', threadID, event.messageID);
-                return;
-              }
-
-              const role = aliases(command)?.role ?? 0;
-              const isAdmin = config?.[0]?.masterKey?.admin?.includes(senderID) || admin.includes(senderID);
-              const isThreadAdmin = isAdmin || ((Array.isArray(adminIDS) ? adminIDS.find((a) => Object.keys(a)[0] === threadID) : null)?.[threadID] || [])
-                .some((a) => a.id === senderID);
-
-              if ((role == 1 && !isAdmin) || (role == 2 && !isThreadAdmin) || (role == 3 && !config?.[0]?.masterKey?.admin?.includes(senderID))) {
-                safeSend(api, "You don't have permission to use this command.", threadID, event.messageID);
-                return;
-              }
-            }
-
-            if (body && body.toLowerCase().startsWith((prefix || '').toLowerCase()) && aliases(command)?.name) {
-              if (blacklist.includes(senderID)) {
-                safeSend(api, "We're sorry, but you've been banned from using bot. If you believe this is a mistake or would like to appeal, please contact one of the bot admins for further assistance.", threadID, event.messageID);
-                return;
-              }
-            }
-
-            if (body && aliases(command)?.name) {
-              const now = Date.now();
-              const name = aliases(command)?.name;
-              const sender = Utils.cooldowns.get(`${senderID}_${name}_${userid}`);
-              const delay = aliases(command)?.cooldown ?? 0;
-              if (!sender || (now - sender.timestamp) >= delay * 1000) {
-                Utils.cooldowns.set(`${senderID}_${name}_${userid}`, { timestamp: now, command: name });
-              } else {
-                const active = Math.ceil((sender.timestamp + delay * 1000 - now) / 1000);
-                safeSend(api, `Please wait ${active} seconds before using the "${name}" command again.`, threadID, event.messageID);
-                return;
-              }
-            }
-
-            if (body && !command && prefix && body.toLowerCase().startsWith(prefix.toLowerCase())) {
-              safeSend(api, `Invalid command please use ${prefix}help to see the list of available commands.`, threadID, event.messageID);
-              return;
-            }
-
-            if (body && command && prefix && body.toLowerCase().startsWith(prefix.toLowerCase()) && !aliases(command)?.name) {
-              safeSend(api, `Invalid command '${command}' please use ${prefix}help to see the list of available commands.`, threadID, event.messageID);
-              return;
-            }
-
-            // Bawat handleEvent ay naka-try/catch nang hiwalay — kahit may
-            // isang masirang handleEvent, tuloy pa rin ang ibang naka-register.
-            for (const { handleEvent, name } of Utils.handleEvent.values()) {
-              if (handleEvent && name && ((enableCommands[1].handleEvent || []).includes(name) || (enableCommands[0].commands || []).includes(name))) {
-                try {
-                  handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
-                } catch (err) {
-                  console.error(chalk.red(`Error sa handleEvent '${name}': ${err.message}`));
-                }
-              }
-            }
-
-            switch (event.type) {
-              case 'message':
-              case 'message_reply':
-              case 'message_unsend':
-              case 'message_reaction': {
-                const matched = aliases(command?.toLowerCase());
-                if (matched && enableCommands[0].commands.includes(matched.name)) {
-                  try {
-                    await (matched.run || (() => {}))({
-                      api, event, args, enableCommands, admin, prefix, blacklist, Utils,
-                    });
-                  } catch (err) {
-                    console.error(chalk.red(`Error sa command '${matched.name}': ${err.message}`));
-                  }
-                }
-                break;
-              }
-              default:
-                break;
-            }
-          } catch (outerErr) {
-            console.error(chalk.red('[listenMqtt handler error]'), outerErr);
-          }
-        });
-      } catch (error) {
-        console.error(chalk.red(`Error during API listen, outside of listen (${userid}): ${error.message}`));
-        Utils.account.delete(userid);
-        deleteThisUser(userid);
-        return;
-      }
+      // Start robust listener
+      startListening(api, userid, prefix, admin, enableCommands);
 
       resolve();
     });
   });
 }
 
+// ---------------------------------------------------------------------------
+// Robust MQTT Listener with retry
+// ---------------------------------------------------------------------------
+function startListening(api, userid, prefix, admin, enableCommands) {
+  let mqttRetryCount = 0;
+  const MAX_MQTT_RETRIES = 10;
+
+  const listen = () => {
+    try {
+      api.listenMqtt(async (error, event) => {
+        try {
+          if (error) {
+            console.error(chalk.red(`[listenMqtt error] ${userid}:`), error);
+            mqttRetryCount++;
+
+            if (mqttRetryCount >= MAX_MQTT_RETRIES) {
+              console.error(chalk.red(`Too many MQTT errors for ${userid}. Removing session...`));
+              Utils.account.delete(userid);
+              deleteThisUser(userid);
+              return;
+            }
+
+            const delay = 6000 + mqttRetryCount * 2500;
+            console.log(chalk.yellow(`Reconnecting MQTT for ${userid} in ${Math.round(delay / 1000)}s (attempt ${mqttRetryCount})...`));
+            setTimeout(listen, delay);
+            return;
+          }
+
+          // Successful message → reset retry counter
+          mqttRetryCount = 0;
+          if (!event) return;
+
+          const threadID = event.threadID;
+          const senderID = event.senderID;
+
+          const database = safeReadJSON('./data/database.json', []);
+          let data = Array.isArray(database) ? database.find((item) => Object.keys(item)[0] === threadID) : null;
+          let adminIDS = database;
+          if (!data && threadID) {
+            adminIDS = await createThread(threadID, api).catch((err) => {
+              console.error(chalk.red(`Hindi ma-create ang thread record: ${err.message}`));
+              return database;
+            });
+          }
+
+          const history = safeReadJSON('./data/history.json', []);
+          const blacklist = (Array.isArray(history) ? history.find((b) => b.userid === userid) : null)?.blacklist || [];
+
+          const body = event.body || '';
+          const hasPrefix = (body && aliases(body.trim().toLowerCase().split(/ +/).shift())?.hasPrefix === false) ? '' : prefix;
+          const [command, ...args] = (body.trim().toLowerCase().startsWith((hasPrefix || '').toLowerCase())
+            ? body.trim().substring((hasPrefix || '').length).trim().split(/\s+/).map((a) => a.trim())
+            : []);
+
+          if (hasPrefix && aliases(command)?.hasPrefix === false) {
+            safeSend(api, "Invalid usage this command doesn't need a prefix", threadID, event.messageID);
+            return;
+          }
+
+          if (body && aliases(command)?.name) {
+            const isDevOnly = aliases(command)?.dev;
+            if (isDevOnly && !dev.includes(senderID)) {
+              safeSend(api, 'You dont have access to this command, you need to be a developer.', threadID, event.messageID);
+              return;
+            }
+
+            const role = aliases(command)?.role ?? 0;
+            const isAdmin = config?.[0]?.masterKey?.admin?.includes(senderID) || admin.includes(senderID);
+            const isThreadAdmin = isAdmin || ((Array.isArray(adminIDS) ? adminIDS.find((a) => Object.keys(a)[0] === threadID) : null)?.[threadID] || [])
+              .some((a) => a.id === senderID);
+
+            if ((role == 1 && !isAdmin) || (role == 2 && !isThreadAdmin) || (role == 3 && !config?.[0]?.masterKey?.admin?.includes(senderID))) {
+              safeSend(api, "You don't have permission to use this command.", threadID, event.messageID);
+              return;
+            }
+          }
+
+          if (body && body.toLowerCase().startsWith((prefix || '').toLowerCase()) && aliases(command)?.name) {
+            if (blacklist.includes(senderID)) {
+              safeSend(api, "We're sorry, but you've been banned from using bot. If you believe this is a mistake or would like to appeal, please contact one of the bot admins for further assistance.", threadID, event.messageID);
+              return;
+            }
+          }
+
+          if (body && aliases(command)?.name) {
+            const now = Date.now();
+            const name = aliases(command)?.name;
+            const sender = Utils.cooldowns.get(`\( {senderID}_ \){name}_${userid}`);
+            const delay = aliases(command)?.cooldown ?? 0;
+            if (!sender || (now - sender.timestamp) >= delay * 1000) {
+              Utils.cooldowns.set(`\( {senderID}_ \){name}_${userid}`, { timestamp: now, command: name });
+            } else {
+              const active = Math.ceil((sender.timestamp + delay * 1000 - now) / 1000);
+              safeSend(api, `Please wait \( {active} seconds before using the " \){name}" command again.`, threadID, event.messageID);
+              return;
+            }
+          }
+
+          if (body && !command && prefix && body.toLowerCase().startsWith(prefix.toLowerCase())) {
+            safeSend(api, `Invalid command please use ${prefix}help to see the list of available commands.`, threadID, event.messageID);
+            return;
+          }
+
+          if (body && command && prefix && body.toLowerCase().startsWith(prefix.toLowerCase()) && !aliases(command)?.name) {
+            safeSend(api, `Invalid command '${command}' please use ${prefix}help to see the list of available commands.`, threadID, event.messageID);
+            return;
+          }
+
+          // Handle events
+          for (const { handleEvent, name } of Utils.handleEvent.values()) {
+            if (handleEvent && name && ((enableCommands[1].handleEvent || []).includes(name) || (enableCommands[0].commands || []).includes(name))) {
+              try {
+                handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
+              } catch (err) {
+                console.error(chalk.red(`Error sa handleEvent '${name}': ${err.message}`));
+              }
+            }
+          }
+
+          // Commands
+          switch (event.type) {
+            case 'message':
+            case 'message_reply':
+            case 'message_unsend':
+            case 'message_reaction': {
+              const matched = aliases(command?.toLowerCase());
+              if (matched && enableCommands[0].commands.includes(matched.name)) {
+                try {
+                  await (matched.run || (() => {}))({
+                    api, event, args, enableCommands, admin, prefix, blacklist, Utils,
+                  });
+                } catch (err) {
+                  console.error(chalk.red(`Error sa command '${matched.name}': ${err.message}`));
+                }
+              }
+              break;
+            }
+            default:
+              break;
+          }
+        } catch (outerErr) {
+          console.error(chalk.red(`[listenMqtt handler error] ${userid}:`), outerErr);
+        }
+      });
+    } catch (err) {
+      console.error(chalk.red(`Failed to start listenMqtt for ${userid}: ${err.message}`));
+    }
+  };
+
+  listen();
+}
+
+// ---------------------------------------------------------------------------
+// User management helpers
+// ---------------------------------------------------------------------------
 async function deleteThisUser(userid) {
   const configFile = './data/history.json';
   const history = safeReadJSON(configFile, []);
@@ -468,6 +526,9 @@ function aliases(command) {
   return found ? found[1] : null;
 }
 
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 async function main() {
   try {
     const empty = require('fs-extra');
@@ -500,7 +561,7 @@ async function main() {
       } catch (err) {
         console.error(chalk.red(`Error sa scheduled restart cleanup: ${err.message}`));
       } finally {
-        process.exit(1);
+        process.exit(1); // watchdog will restart
       }
     });
 
