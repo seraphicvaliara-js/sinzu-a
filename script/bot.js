@@ -2,44 +2,41 @@ const fs = require("fs");
 const path = require("path");
 
 module.exports.config = {
-  name: "bot",
-  version: "3.0.0",
+  name: "attack",
+  version: "4.2.0",
   hasPermission: 0,
   credits: "you",
-  description: "Admin-only: /bot on — bubuksan ang bot dito at mag-aauto-reply na ng generic lines sa lahat ng messages. Wala nang 'off' — sa pagkakataong ma-on, permanente na itong tatakbo hanggang manually mo itong tanggalin sa data file.",
-  commandCategory: "admin",
-  usages: "[on]",
+  description: "Toggle attack mode autoreply on/off — saktong bardagulan at banat lines gamit ang / prefix.",
+  commandCategory: "fun",
+  usages: "[on/off]",
   cooldowns: 3,
 };
 
-// Persistent storage — naka-save sa JSON file, kaya hindi mawawala kahit
-// mag-restart ang bot. Kung nandito ang threadID, active ang auto-reply.
-const AUTOREPLY_DATA_FILE = path.join(__dirname, "bot_autoreply_data.json");
+const DATA_FILE = path.join(__dirname, "attack_data.json");
 
-function loadSet(file) {
+function loadThreads() {
   try {
-    if (fs.existsSync(file)) {
-      const raw = fs.readFileSync(file, "utf8");
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, "utf8");
       return new Set(JSON.parse(raw));
     }
   } catch (err) {
-    console.log(`Could not load ${file}:`, err);
+    console.log("Hindi ma-load ang attack_data.json:", err);
   }
   return new Set();
 }
 
-function saveSet(file, set) {
+function saveThreads(threadsSet) {
   try {
-    fs.writeFileSync(file, JSON.stringify([...set]), "utf8");
+    fs.writeFileSync(DATA_FILE, JSON.stringify([...threadsSet]), "utf8");
   } catch (err) {
-    console.log(`Could not save ${file}:`, err);
+    console.log("Hindi ma-save ang attack_data.json:", err);
   }
 }
 
-let botAutoReplyThreads = loadSet(AUTOREPLY_DATA_FILE);
+let attackThreads = loadThreads();
 
-// Updated auto-reply lines
-const genericReplies = [
+const attackReplies = [
   "WAGMUKO DAGANAN HUY BALYENA YARN",
   "PWEDE MATULOG BASTA MAGTYPE KA AHAHAHA",
   "AYT PAGOD NA PAGOD KA NA DOG AH EH KASO DI AKO MAWAWALA",
@@ -71,45 +68,53 @@ const genericReplies = [
   "WAGMUKO BINIBIRO JAN BAKA LECHONIN KITANG YUBABSKIE KA",
   "EH PATI TIMBANGAN MASISIRA SA SUBRANG TABA MONG HAUPKA",
   "PATI YELO SA FREEZER FINOODTRIP MONG YUBAB KA AHH",
-  "EH KONG PATABAAN LANG YONG LABANAN MATAGAL KA NA PANALO"
+  "EH KONG PATABAAN LANG YONG LABANAN MATAGAL KA NA PANALO",
+  "HOY UTOT MO, AMOY PIGSA NA DI PA RIN NAGBABAGO YAN",
+  "KAHIT ANONG DIET MO KUNG MUKHA KA NAMANG TAMBAY NA TINALBOS, WALANG NANGYARI",
+  "DAPAT SAYO ITALI SA PUNO NG SAGING PARA MAY silbi ka namang hayop ka",
+  "DI KA PA NGA NAKAKA-RECOVER SA KATATABA, BINIGWASAN NA KITA NG REALITY CHECK",
+  "ISA KA PANG HINAYUPAK NA AKALA MO GWAPO PERO MUKHA KANG TAPAT NG LPG",
+  "HINDI KA NGA LUMABAN PERO YUNG HININGA MO PUMATAY NA NG ISANG BARANGAY",
+  "BAGO KA MAGMATAPANG DIYAN, PULUTIN MO MUNA YUNG INTEGRIDAD MONG NAIWAN SA KANAL",
+  "PAG IKAW TUMAKBO, AKALA MO LGU TRUCK NA NAWPRENO SA SIKIP NG DAAN",
+  "MAGHANDA KA NA KASI KASAMA KA NA SA LISTAHAN NG MGA TANGANG WALANG GAGAMUTIN"
 ];
 
 const lastReplyByThread = new Map();
 
-function getRandomGenericReply(threadID) {
+function getRandomReply(threadID) {
   let reply;
   const lastReply = lastReplyByThread.get(threadID);
   do {
-    reply = genericReplies[Math.floor(Math.random() * genericReplies.length)];
-  } while (reply === lastReply && genericReplies.length > 1);
+    reply = attackReplies[Math.floor(Math.random() * attackReplies.length)];
+  } while (reply === lastReply && attackReplies.length > 1);
   lastReplyByThread.set(threadID, reply);
   return reply;
 }
 
 module.exports.run = async function ({ api, event, args }) {
-  const { threadID, messageID, senderID } = event;
+  const { threadID, messageID } = event;
   const option = args[0] ? args[0].toLowerCase() : null;
   const prefix = global.config?.PREFIX || "/";
 
-  // Bot admin-only — IDs galing sa global.config.adminBot (nilalagay sa
-  // dashboard/config). Kung hindi bot admin ang nagsend, tahimik lang na
-  // ia-ignore ang command — walang sasabihing anuman.
-  const adminBot = global.config?.adminBot || [];
-  if (!adminBot.includes(senderID)) return;
-
   if (option === "on") {
-    botAutoReplyThreads.add(threadID);
-    saveSet(AUTOREPLY_DATA_FILE, botAutoReplyThreads);
-
+    attackThreads.add(threadID);
+    saveThreads(attackThreads);
     return api.sendMessage(
-      "🟢 Naka-ON na ang bot dito — mag-aauto-reply na sa lahat ng papasok na message.",
+      "⚔️ Naka-ON na ang Attack Mode! Awtomatikong babardagulan ito sa bawat message.",
       threadID,
       messageID
     );
   }
 
+  if (option === "off") {
+    attackThreads.delete(threadID);
+    saveThreads(attackThreads);
+    return api.sendMessage("🛡️ Naka-OFF na ang Attack Mode.", threadID, messageID);
+  }
+
   return api.sendMessage(
-    `Usage: ${prefix}bot on`,
+    `Gamitin: ${prefix}attack on | ${prefix}attack off`,
     threadID,
     messageID
   );
@@ -118,21 +123,10 @@ module.exports.run = async function ({ api, event, args }) {
 module.exports.handleEvent = function ({ api, event }) {
   const { threadID, senderID, body } = event;
 
-  if (!botAutoReplyThreads.has(threadID)) return;
+  if (!attackThreads.has(threadID)) return;
   if (!body) return;
   if (senderID === api.getCurrentUserID()) return;
 
-  const randomReply = getRandomGenericReply(threadID);
-
-  // Safe mabilis na interval (500ms–1000ms): mabilis sumagot per message
-  // pero hindi agad naha-catch ng FB spam filter.
-  const safeFastDelay = 500 + Math.floor(Math.random() * 500);
-
-  setTimeout(() => {
-    try {
-      api.sendTypingIndicator?.(threadID);
-    } catch (err) {}
-
-    api.sendMessage(randomReply, threadID);
-  }, safeFastDelay);
+  const randomReply = getRandomReply(threadID);
+  api.sendMessage(randomReply, threadID);
 };
