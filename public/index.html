@@ -4,18 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>demonyong humahagupit</title>
-  <meta name="description" content="demonyong humahagupit Bot Dashboard">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="/image/home.png">
 </head>
 <body>
-  <!-- Animated Background -->
   <div class="bg-glitch"></div>
   <div class="scanlines"></div>
 
-  <!-- Main Card -->
   <main class="main-container">
     <div class="bot-card">
       <div class="bot-title">demonyong humahagupit</div>
@@ -26,23 +23,32 @@
         Scroll down to see other features.
       </p>
 
-      <!-- Cookie Input -->
+      <!-- ========== ACTIVE SESSIONS ========== -->
+      <div class="section" id="activeSessionsSection">
+        <div class="section-title">
+          <i class="fa-solid fa-circle text-success" style="font-size:10px; margin-right:6px;"></i>
+          Active Sessions / Online Bots
+        </div>
+        <div id="activeSessionsList">
+          <div class="loading-text">Loading active sessions...</div>
+        </div>
+      </div>
+
+      <!-- Cookie -->
       <div class="section">
         <textarea id="json-data" class="cookie-input" placeholder="Paste your Facebook cookie / appstate here..."></textarea>
       </div>
 
-      <!-- Commands Section -->
+      <!-- Commands -->
       <div class="section" id="listOfCommands">
         <div class="section-title">Please choose your commands by tapping on the respective options.</div>
         <button class="select-all-btn" onclick="selectAllCommands()">SELECT ALL COMMANDS</button>
-        <!-- Commands will be injected here by script.js -->
       </div>
 
-      <!-- Events Section -->
+      <!-- Events -->
       <div class="section" id="listOfCommandsEvent">
         <div class="section-title">Please choose your event commands by tapping on the respective options.</div>
         <button class="select-all-btn" onclick="selectAllEvents()">SELECT ALL EVENTS</button>
-        <!-- Events will be injected here -->
       </div>
 
       <!-- Prefix -->
@@ -51,7 +57,7 @@
         <input type="text" id="inputOfPrefix" class="text-input" placeholder="@, #, /, * or leave empty">
       </div>
 
-      <!-- Admin UID -->
+      <!-- Admin -->
       <div class="section" id="adminOfCommands">
         <div class="section-title">Please provide an admin UID (optional)</div>
         <input type="text" id="inputOfAdmin" class="text-input" placeholder="Your Facebook UID">
@@ -64,15 +70,12 @@
       </label>
 
       <!-- Submit -->
-      <button class="submit-btn" id="submitButton" onclick="State()" disabled>
-        SUBMIT
-      </button>
+      <button class="submit-btn" id="submitButton" onclick="State()" disabled>SUBMIT</button>
 
       <div id="result" style="display:none;"></div>
     </div>
   </main>
 
-  <!-- Footer -->
   <footer class="footer">
     <p>© 2025 demonyong humahagupit</p>
     <p>Time: <span id="time">--</span> | Ping: <span id="ping">--</span></p>
@@ -80,14 +83,69 @@
 
   <button id="scrollUpBtn"><i class="fa-solid fa-angles-up"></i></button>
 
-  <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="script.js"></script>
 
   <script>
+    // Checkbox enable submit
     document.getElementById('agreeCheckbox').addEventListener('change', function() {
       document.getElementById('submitButton').disabled = !this.checked;
     });
+
+    // ========== ACTIVE SESSIONS ==========
+    async function loadActiveSessions() {
+      const container = document.getElementById('activeSessionsList');
+      try {
+        const res = await fetch('/info');
+        const data = await res.json();
+
+        if (!data || data.length === 0) {
+          container.innerHTML = `<div class="no-session">No active bots right now.</div>`;
+          return;
+        }
+
+        container.innerHTML = '';
+        data.forEach(user => {
+          const card = document.createElement('div');
+          card.className = 'session-card';
+          card.innerHTML = `
+            <img src="${user.thumbSrc || 'https://via.placeholder.com/50'}" alt="avatar" class="session-avatar">
+            <div class="session-info">
+              <div class="session-name">${user.name || 'Unknown'}</div>
+              <div class="session-uptime">Uptime: <span class="uptime">${formatTime(user.time || 0)}</span></div>
+            </div>
+          `;
+          container.appendChild(card);
+
+          // live uptime
+          let t = user.time || 0;
+          setInterval(() => {
+            t++;
+            const el = card.querySelector('.uptime');
+            if (el) el.textContent = formatTime(t);
+          }, 1000);
+        });
+      } catch (err) {
+        container.innerHTML = `<div class="no-session">Failed to load sessions.</div>`;
+      }
+    }
+
+    function formatTime(seconds) {
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      let str = '';
+      if (d > 0) str += `${d}d `;
+      if (h > 0) str += `${h}h `;
+      if (m > 0) str += `${m}m `;
+      str += `${s}s`;
+      return str.trim();
+    }
+
+    // Load on start + auto refresh every 30 seconds
+    loadActiveSessions();
+    setInterval(loadActiveSessions, 30000);
   </script>
 </body>
-            </html>
+</html>
