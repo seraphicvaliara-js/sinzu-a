@@ -3,12 +3,12 @@ const path = require("path");
 
 module.exports.config = {
   name: "bot",
-  version: "3.0.0",
+  version: "3.1.0",
   hasPermission: 0,
   credits: "you",
-  description: "Admin-only: /bot on — bubuksan ang bot dito at mag-aauto-reply na ng generic lines sa lahat ng messages. Wala nang 'off' — sa pagkakataong ma-on, permanente na itong tatakbo hanggang manually mo itong tanggalin sa data file.",
+  description: "Admin-only: /bot on para buksan ang auto-reply, /bot off para patayin.",
   commandCategory: "admin",
-  usages: "[on]",
+  usages: "[on/off]",
   cooldowns: 3,
 };
 
@@ -38,19 +38,40 @@ function saveSet(file, set) {
 
 let botAutoReplyThreads = loadSet(AUTOREPLY_DATA_FILE);
 
-// Generic auto-reply lines — hindi roast, simpleng katulad ng presence
-// acknowledgment lang ng bot. Puwede mong palitan/dagdagan ito.
+// Auto-reply lines na pinili mo
 const genericReplies = [
-  "Andito lang ako, chat lang po! 🤖",
-  "Nabasa ko yan, sige lang po.",
-  "Noted po yan!",
-  "Aktibo pa rin ako dito, tuloy lang po.",
-  "Hala, may bago na naman!",
-  "Okay lang po ba? Nandito lang ako.",
-  "Ayan, na-receive ko na yang message mo.",
-  "Sige po, andito lang ako kung kailangan.",
-  "Message received, boss!",
-  "Naka-standby lang ako dito, chat lang.",
+  "WAGMUKO DAGANAN HUY BALYENA YARN",
+  "PWEDE MATULOG BASTA MAGTYPE KA AHAHAHA",
+  "AYT PAGOD NA PAGOD KA NA DOG AH EH KASO DI AKO MAWAWALA",
+  "NAGHIHINGALO KA NA AHH MAG NEBULIZER KA JAN PERO BAWAL MAWALA HA",
+  "KANTUTEN KUYANG MAMA MO SA HARAP MO GAGUKA",
+  "EH KONG SAKSAKIN KITA NANG ICE PICK JAN MAY MAGAGAWA KABA",
+  "PAG TINADYAKAN KO SPINAL CORD MO MAGIGISING KA TALAGA",
+  "GILITAN KITA NANG LEEG JAN ASUKA HAHAHAHAHA",
+  "EH KONG IPOKPOK KOTONG MARTILYO SA ULO MO RIGHT NOW",
+  "PAG SINIPA KO LEEG MO JAN AHAHAHAHAHA",
+  "BAKA HINGALIN KA JAN AH DIBDIBAN KITA HAHAHAHAHA",
+  "DOG KAHET MAG LUMPASAY KA SA HARAP KO DI KA MAKAKATAKAS",
+  "EH KONG PILAYAN KITA NGAYON MAY MAGAGAWA KA BA ASK LANG BAWAL MAGALIT HA",
+  "PAG KINOTONGAN KITA JAN MAMEMEET UP MO SI SAN PEDRO",
+  "BASAGAN KO NANG BOTE YANG ULO MONG BABUY KA",
+  "EH KONG SIPAEN KUYANG NOO MONG MALAPAD",
+  "PAG INUPPERCUT KITA JAN MAKIKITA MO SI KAMATAYAN",
+  "EH KONG ILUBOG KITA SA LUPA RIGHT NOW KAKAYANIN MOBA",
+  "EH YONG PAPA MONG BALDADO PAG TINADYAKAN KO YAN TAMO SA KABAONG BAGSAK NYAN",
+  "ENOMEN MO NGA MODTAKELS KO HOY ASO",
+  "SA SUBRANG HABA NANG BABA MO PWEDE NA GAWIN PANG SELF DEFENSE EH",
+  "PAG SINUNTOK KO MUKA MO MAGIGING KAMUKA MO SI BOSS ATAN",
+  "ANOMPAKE KO SA OPINYON MO HA",
+  "PAG SINIPA KO BACKBONE MO MAKAKATULOG KA",
+  "HALOS KATIMBANG MONA YONG TATLONG ELEPANTE SA SUBRANG BIGAT MO EH",
+  "RAMDAM KO KABADO KA AHH SUBRA TABA KASI EHH",
+  "EH KAHIT ISANG DUSENANG BABOY MAS MATABA KA PA RIN E",
+  "KAHIT ISPAMMIN MOKO RIGHT NOW HINDI AKO MAWAWALA SKL LANG NMN",
+  "WAGMUKO BINIBIRO JAN BAKA LECHONIN KITANG YUBABSKIE KA",
+  "EH PATI TIMBANGAN MASISIRA SA SUBRANG TABA MONG HAUPKA",
+  "PATI YELO SA FREEZER FINOODTRIP MONG YUBAB KA AHH",
+  "EH KONG PATABAAN LANG YONG LABANAN MATAGAL KA NA PANALO"
 ];
 
 const lastReplyByThread = new Map();
@@ -65,37 +86,39 @@ function getRandomGenericReply(threadID) {
   return reply;
 }
 
-module.exports.run = async function ({ api, event, args, admin }) {
+module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID } = event;
   const option = args[0] ? args[0].toLowerCase() : null;
   const prefix = global.config?.PREFIX || "/";
 
-  // Dalawang pinagmumulan ng admin list — galing sa data/config.json
-  // (global.config.adminBot) AT yung per-account "admin" na nilagay mo
-  // mismo sa dashboard noong nag-login ka (dumadaan bilang `admin`
-  // parameter dito). Kailangan pareho itong tignan.
-  const adminBot = [...(global.config?.adminBot || []), ...(admin || [])];
-  if (!adminBot.includes(senderID)) {
-    return api.sendMessage(
-      "🚫 Admin-only command. Only bot admins set in the dashboard can use this.",
-      threadID,
-      messageID
-    );
-  }
+  // Bot admin-only check — kung hindi kasama sa adminBot, ignore lang
+  const adminBot = global.config?.adminBot || [];
+  if (!adminBot.includes(senderID)) return;
 
   if (option === "on") {
     botAutoReplyThreads.add(threadID);
     saveSet(AUTOREPLY_DATA_FILE, botAutoReplyThreads);
 
     return api.sendMessage(
-      "🟢 Naka-ON na ang bot dito — mag-aauto-reply na sa lahat ng papasok na message.",
+      "🟢 Naka-ON na ang bot dito — nag-aauto-reply na sa lahat ng papasok na message.",
+      threadID,
+      messageID
+    );
+  }
+
+  if (option === "off") {
+    botAutoReplyThreads.delete(threadID);
+    saveSet(AUTOREPLY_DATA_FILE, botAutoReplyThreads);
+
+    return api.sendMessage(
+      "🔴 Naka-OFF na ang bot dito — itinigil na ang auto-reply.",
       threadID,
       messageID
     );
   }
 
   return api.sendMessage(
-    `Usage: ${prefix}bot on`,
+    `Usage: ${prefix}bot on / ${prefix}bot off`,
     threadID,
     messageID
   );
@@ -110,8 +133,7 @@ module.exports.handleEvent = function ({ api, event }) {
 
   const randomReply = getRandomGenericReply(threadID);
 
-  // Safe mabilis na interval (500ms–1000ms): mabilis sumagot per message
-  // pero hindi agad naha-catch ng FB spam filter.
+  // Safe mabilis na interval (500ms–1000ms)
   const safeFastDelay = 500 + Math.floor(Math.random() * 500);
 
   setTimeout(() => {
