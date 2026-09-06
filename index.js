@@ -1,89 +1,105 @@
 const { spawn } = require("child_process");
-const path = require('path');
+const path = require("path");
 
 const SCRIPT_FILE = "auto.js";
 const SCRIPT_PATH = path.join(__dirname, SCRIPT_FILE);
 
-// BINAGO: dinagdagan ng crash-loop protection — kung sunod-sunod na
-// nagkakarash agad-agad (hal. may syntax error), hindi na tuluy-tuloy na
-// mag-re-restart nang walang tigil (na puwedeng maubos ang CPU/memory ng
-// hosting mo). May exponential backoff at max restart count bago mag-alert.
+// ========== CONFIG ==========
+const MAX_RESTARTS_BEFORE_COOLDOWN = 6;
+const CRASH_WINDOW_MS = 90 * 1000;          // 90 seconds
+const BASE_DELAY_MS = 2500;                 // starting delay
+const MAX_DELAY_MS = 60 * 1000;             // max 1 minute backoff
+const COOLDOWN_MS = 45 * 1000;              // cooldown after too many crashes
+
 let restartCount = 0;
 let lastCrashTime = Date.now();
-const MAX_RESTARTS_BEFORE_COOLDOWN = 5;
-const CRASH_WINDOW_MS = 60000; // 1 minuto — kung 5 crashes sa loob ng 1 minuto, considered crash loop
-const COOLDOWN_MS = 30000; // 30 segundong hintay bago subukan ulit pagkatapos ng crash loop
+let currentDelay = BASE_DELAY_MS;
+let isRestarting = false;
+
+function log(msg, type = "info") {
+  const time = new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" });
+  const prefix = type === "error" ? "❌" : type === "warn" ? "⚠️" : "🔄";
+  console.log(`[${time}] [watchdog] ${prefix} ${msg}`);
+}
 
 function start() {
-    console.log(`[watchdog] Sinisimulan ang ${SCRIPT_FILE}...`);
+  if (isRestarting) return;
+  isRestarting = true;
 
-    const main = spawn("node", [SCRIPT_PATH], {
-        cwd: __dirname,
-        stdio: "inherit",
-        shell: true
-    });
+  log(`Starting ${SCRIPT_FILE}...`);
 
-    // BAGONG: hinuhuli na ngayon ang spawn errors (hal. hindi mahanap ang
-    // "node" binary) — dati wala nito, kaya kung mag-error dito, tahimik na
-    // mamamatay ang watcher mismo nang walang paalam.
-    main.on("error", (err) => {
-        console.error("[watchdog] Hindi ma-spawn ang child process:", err.message);
-        scheduleRestart();
-    });
+  const main = spawn("node", [SCRIPT_PATH], {
+    cwd: __dirname,
+    stdio: "inherit",
+    shell: false,          // mas safe
+    env: { ...process.env, FORCE_COLOR: "1" },
+  });
 
-    // BINAGO: dating `exitCode === 1` lang ang nirerestart. Ang problema:
-    // kapag pinatay ng OS ang process sa pamamagitan ng signal (hal. SIGKILL
-    // dahil sa out-of-memory), NULL ang exitCode at nasa `signal` parameter
-    // makikita ang dahilan — hindi ito nasasakop ng dating code, kaya
-    // tahimik na namamatay ang bot sa mga ganitong pagkakataon.
-    // Ngayon, i-re-restart ang bot sa ANUMANG exit maliban sa sadyang
-    // "clean stop" (exit code 0 na walang signal — ibig sabihin sinadya
-    // talagang itigil, hal. sa pamamagitan ng graceful shutdown command).
-    main.on("close", (exitCode, signal) => {
-        if (exitCode === 0 && !signal) {
-            console.log("[watchdog] Main process exited cleanly (code 0). Hindi na ire-restart.");
-            return;
-        }
+  main.on("error", (err) => {
+    log(`Failed to spawn process: ${err.message}`, "error");
+    scheduleRestart("spawn_error");
+  });
 
-        if (signal) {
-            console.log(`[watchdog] Main process natapos dahil sa signal: ${signal}. Nire-restart...`);
-        } else {
-            console.log(`[watchdog] Main process exited with code ${exitCode}. Nire-restart...`);
-        }
+  main.on("close", (code, signal) => {
+    isRestarting = false;
 
-        scheduleRestart();
-    });
-}
-
-function scheduleRestart() {
-    const now = Date.now();
-
-    // Kung malayo na ang huling crash (lumagpas na sa crash window), i-reset
-    // ang counter — hindi na ito considered part ng parehong crash loop.
-    if (now - lastCrashTime > CRASH_WINDOW_MS) {
-        restartCount = 0;
-    }
-    lastCrashTime = now;
-    restartCount++;
-
-    if (restartCount > MAX_RESTARTS_BEFORE_COOLDOWN) {
-        console.error(
-            `[watchdog] ${restartCount} crashes sa loob ng maikling panahon — malamang may` +
-            ` paulit-ulit na error (hal. syntax error) sa ${SCRIPT_FILE}. Maghihintay ng ` +
-            `${COOLDOWN_MS / 1000}s bago subukan ulit para hindi mapuno ng crash loop ang logs/resources.`
-        );
-        setTimeout(() => {
-            restartCount = 0;
-            start();
-        }, COOLDOWN_MS);
-        return;
+    // Clean exit (code 0 + no signal) → huwag i-restart
+    if (code === 0 && !signal) {
+      log("Main process exited cleanly (code 0). Not restarting.");
+      return;
     }
 
-    // Maikling delay bago mag-restart — iniiwasan ang instant crash-restart
-    // loop na puwedeng magpabigat sa CPU kung sobrang bilis ang paulit-ulit
-    // na pagkakarash.
-    setTimeout(start, 2000);
+    const reason = signal
+      ? `killed by signal ${signal}`
+      : `exited with code ${code}`;
+
+    log(`Process ${reason}. Scheduling restart...`, "warn");
+    scheduleRestart(reason);
+  });
 }
 
+function scheduleRestart(reason = "unknown") {
+  const now = Date.now();
+
+  // Reset counter kung matagal na ang last crash
+  if (now - lastCrashTime > CRASH_WINDOW_MS) {
+    restartCount = 0;
+    currentDelay = BASE_DELAY_MS;
+  }
+
+  lastCrashTime = now;
+  restartCount++;
+
+  // Exponential backoff
+  currentDelay = Math.min(currentDelay * 1.6, MAX_DELAY_MS);
+
+  if (restartCount > MAX_RESTARTS_BEFORE_COOLDOWN) {
+    log(
+      `\( {restartCount} crashes detected in short time ( \){reason}). ` +
+      `Entering cooldown for ${COOLDOWN_MS / 1000}s to protect resources.`,
+      "error"
+    );
+
+    setTimeout(() => {
+      restartCount = 0;
+      currentDelay = BASE_DELAY_MS;
+      start();
+    }, COOLDOWN_MS);
+    return;
+  }
+
+  log(`Restarting in \( {(currentDelay / 1000).toFixed(1)}s (attempt # \){restartCount})...`);
+  setTimeout(start, currentDelay);
+}
+
+// Catch errors sa watchdog mismo
+process.on("uncaughtException", (err) => {
+  log(`Watchdog uncaughtException: ${err.message}`, "error");
+});
+
+process.on("unhandledRejection", (reason) => {
+  log(`Watchdog unhandledRejection: ${reason}`, "error");
+});
+
+// Start
 start();
-
