@@ -5,8 +5,8 @@ module.exports.config = {
   name: "song",
   version: "1.0.0",
   hasPermission: 0,
-  credits: "GoatBot Custom",
-  description: "Mag-play ng audio mula sa YouTube sa Messenger.",
+  credits: "sinzu",
+  description: "Mag-download at mag-play ng audio mula sa YouTube sa Messenger.",
   usePrefix: true,
   commandCategory: "Media",
   usages: "/song [title / artist]",
@@ -40,7 +40,7 @@ module.exports.run = async function ({ api, event, args }) {
 
     // I-send pabalik sa Messenger bilang Audio attachment
     const msgPayload = {
-      body: `🎵 **${video.title}**\n⏱️ Duration: ${video.timestamp}\n👀 Views: ${video.views.toLocaleString()}`,
+      body: `🎵 ${video.title}\n⏱️ Duration: ${video.timestamp}\n👀 Views: ${video.views.toLocaleString()}`,
       attachment: audioStream
     };
 
@@ -48,6 +48,6 @@ module.exports.run = async function ({ api, event, args }) {
 
   } catch (err) {
     console.error("[SONG CMD ERROR]:", err);
-    return api.sendMessage("❌ Nagka-error habang kinuha ang audio mula sa YouTube. Pakisubukan ulit.", threadID, messageID);
+    return api.sendMessage("❌ Nagka-error habang dina-download ang audio. Pakisubukan ulit.", threadID, messageID);
   }
 };
