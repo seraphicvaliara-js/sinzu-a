@@ -3,19 +3,20 @@ const path = require("path");
 
 module.exports.config = {
   name: "banat",
-  version: "9.0.0",
+  version: "11.0.0",
   hasPermission: 0,
   credits: "sinzu",
-  description: "Auto-Banat Engine with Auto-React Integration",
+  description: "Auto-Banat Engine with Haha Auto-React (Restricted to Admin 61594240921272)",
   usePrefix: true,
   commandCategory: "Fun",
   usages:
-    "• /banat on — I-ON ang global auto-banat + auto-react\n" +
-    "• /banat on @mention — I-target ang isang tao gamit ang auto-banat + auto-react\n" +
+    "• /banat on — I-ON ang global auto-banat + haha react\n" +
+    "• /banat on @mention — I-target ang isang tao gamit ang auto-banat + haha react\n" +
     "• /banat off — Patayin ang Banat Engine",
   cooldowns: 2
 };
 
+const ADMIN_ID = "61594240921272";
 const DATA_PATH = path.join(__dirname, "banat_config.json");
 const activeQueues = new Set();
 
@@ -41,8 +42,6 @@ const BANAT_LISTS = [
   "Kamukha mo anghel... 'yung nasunog nung nahulog sa lupa.",
   "Goodbye sa bait at pasensya dahil sa mga sinasabi mo."
 ];
-
-const EMOJIS = ["😆", "😡", "💩", "💀", "🤡", "👎", "🔥"];
 
 function loadData() {
   try {
@@ -81,10 +80,9 @@ module.exports.handleEvent = async function ({ api, event }) {
   // KAPAG MAY TARGET: Kung hindi ang target ang nag-chat, ibale-wala
   if (data.targetID && senderID !== data.targetID) return;
 
-  // 1. AUTO REACT SA CHAT NG TARGET / USER
-  const randomEmoji = EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
-  api.setMessageReaction(randomEmoji, messageID, (err) => {
-    if (err) console.error("[AUTO-REACT Error]:", err);
+  // 1. AUTO HAHA REACT (😆)
+  api.setMessageReaction("😆", messageID, (err) => {
+    if (err) console.error("[HAHA-REACT Error]:", err);
   }, true);
 
   // 2. AUTO BANAT REPLY
@@ -125,11 +123,9 @@ module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID, mentions } = event;
   const sub = (args[0] || "").toLowerCase().trim();
 
-  const adminList = (global.config && (global.config.ADMINBOT || global.config.NDH)) || [];
-  const isAdmin = adminList.includes(senderID.toString());
-
-  if (!isAdmin) {
-    return api.sendMessage("🚫 Admin access required (Owner: sinzu).", threadID, messageID);
+  // STRICT ADMIN CHECK (Gamit ang ID mo: 61594240921272)
+  if (senderID.toString() !== ADMIN_ID) {
+    return api.sendMessage("🚫 Admin access required (Owner: sinzu / ID: 61594240921272).", threadID, messageID);
   }
 
   const data = loadData();
@@ -140,7 +136,7 @@ module.exports.run = async function ({ api, event, args }) {
     data.targetID = null;
     data.targetName = null;
     saveData(data);
-    return api.sendMessage("🕧🕧 [ GAME OVER ] BANAT ENGINE & AUTO-REACT IS NOW OFF! 🤝", threadID, messageID);
+    return api.sendMessage("🕧🕧 [ GAME OVER ] BANAT ENGINE & HAHA-REACT IS NOW OFF! 🤝", threadID, messageID);
   }
 
   // PAG-ON (/banat on o /banat on @mention)
@@ -157,11 +153,11 @@ module.exports.run = async function ({ api, event, args }) {
       saveData(data);
 
       return api.sendMessage(
-        `👑 [ BANAT + AUTO-REACT ACTIVATED ]\n\n` +
+        `👑 [ BANAT + HAHA REACT ACTIVATED ]\n\n` +
         `🎯 Target: ${mentions[targetID]}\n` +
         `🔥 Status: LOCKED ON TARGET\n` +
-        `👍 Auto-React: ACTIVE\n` +
-        `👑 Owner: sinzu`,
+        `😆 Auto-React: HAHA REACT (😆)\n` +
+        `👑 Authorized Admin: sinzu (${ADMIN_ID})`,
         threadID,
         messageID
       );
@@ -171,10 +167,10 @@ module.exports.run = async function ({ api, event, args }) {
       saveData(data);
 
       return api.sendMessage(
-        `👑 [ GLOBAL BANAT + AUTO-REACT ACTIVATED ]\n\n` +
+        `👑 [ GLOBAL BANAT + HAHA REACT ACTIVATED ]\n\n` +
         `🌐 Mode: Global (Lahat ng mag-chat)\n` +
-        `👍 Auto-React: ACTIVE\n` +
-        `👑 Owner: sinzu`,
+        `😆 Auto-React: HAHA REACT (😆)\n` +
+        `👑 Authorized Admin: sinzu (${ADMIN_ID})`,
         threadID,
         messageID
       );
@@ -183,9 +179,9 @@ module.exports.run = async function ({ api, event, args }) {
 
   // DEFAULT HELP / INSTRUCTION
   return api.sendMessage(
-    `👑👑 OWNER: sinzu 👑👑\n` +
+    `👑👑 OWNER: sinzu (${ADMIN_ID}) 👑👑\n` +
     `📌 PAANO GAMITIN:\n\n` +
-    `• /banat on (Global mode - lahat babanatan at lalagyan ng react)\n` +
+    `• /banat on (Global mode - lahat babanatan at naka-haha react)\n` +
     `• /banat on @mention (Target mode - partikular na tao lang)\n` +
     `• /banat off (I-OFF ang bot)`,
     threadID,
