@@ -16,6 +16,7 @@ module.exports.config = {
   cooldowns: 2
 };
 
+// Admin ID Configuration
 const ADMIN_ID = "61594240921272";
 const DATA_PATH = path.join(__dirname, "banat_config.json");
 
@@ -154,7 +155,6 @@ function saveData(data) {
 // Check kung ang message ay purong numero, 1-100 counting pattern, o dummy resibo
 function isCountingOrNumberSpam(text) {
   const clean = text.trim();
-  // RegEx para ma-detect kung puro number o pattern na #1, 1., 2.. etc.
   return /^\d+$/.test(clean) || /^#?\d+[\.\-\)]?$/.test(clean);
 }
 
@@ -231,7 +231,7 @@ module.exports.run = async function ({ api, event, args }) {
   const sub = (args[0] || "").toLowerCase().trim();
 
   if (senderID.toString() !== ADMIN_ID) {
-    return api.sendMessage("🚫 Admin access required (Owner: sinzu / ID: 61594240921272).", threadID, messageID);
+    return api.sendMessage(`🚫 Admin access required (Owner: sinzu / ID: ${ADMIN_ID}).`, threadID, messageID);
   }
 
   const data = loadData();
@@ -262,7 +262,7 @@ module.exports.run = async function ({ api, event, args }) {
         `⏳ Duration: NO TIME LIMIT (Infinite)\n` +
         `⚡ Anti-Spam: Idle-trigger Delay (2-3s)\n` +
         `🔢 Counter Interceptor: Active\n` +
-        `👑 Admin: sinzu`,
+        `👑 Admin: sinzu (${ADMIN_ID})`,
         threadID,
         messageID
       );
@@ -278,7 +278,7 @@ module.exports.run = async function ({ api, event, args }) {
         `⏳ Duration: NO TIME LIMIT (Infinite)\n` +
         `⚡ Anti-Spam: Idle-trigger Delay (2-3s)\n` +
         `🔢 Counter Interceptor: Active\n` +
-        `👑 Admin: sinzu`,
+        `👑 Admin: sinzu (${ADMIN_ID})`,
         threadID,
         messageID
       );
@@ -294,4 +294,3 @@ module.exports.run = async function ({ api, event, args }) {
     messageID
   );
 };
-
