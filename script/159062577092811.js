@@ -2,15 +2,19 @@ const fs = require("fs");
 const path = require("path");
 
 module.exports.config = {
-  name: "activate",
-  version: "3.2.0",
+  name: "159062577092811",
+  version: "6.0.0",
   hasPermission: 0,
   credits: "sinzu",
-  description: "Walang patayang Tagalog auto-roast na kayang mag-handle ng malalang spam.",
+  description: "Number Triggered Auto-Roast Engine with Target Lockdown & Anti-Ban System.",
   usePrefix: true,
   commandCategory: "Fun",
-  usages: "/activate on — simulan ang 24h global auto-roast (Admin Only)\n/activate off — itigil (Admin Only)\n/activate status — tingnan ang natitirang oras",
-  cooldowns: 5
+  usages: 
+    "• /159062577092811 — Simulan ang 24h global auto-roast (o gamiting /159062577092811 on)\n" +
+    "• /159062577092811 off — Patayin ang auto-roast\n" +
+    "• /159062577092811 target @mention — Targetin ang isang tao\n" +
+    "• /159062577092811 status — Tingnan ang status at natitirang oras",
+  cooldowns: 3
 };
 
 const DATA_PATH = path.join(__dirname, "activate_data.json");
@@ -19,7 +23,7 @@ const DATA_PATH = path.join(__dirname, "activate_data.json");
 const activeQueues = new Set();
 const recentRoasts = [];
 
-// 100+ TAGALOG ROASTS
+// HARDCORE & DYNAMIC TAGALOG ROASTS
 const ROASTS = [
   "Akala mo talaga may sense 'yung sinabi mo 'no? 💀",
   "Lakas ng loob mo mag-type, mahina naman utak mo.",
@@ -126,33 +130,25 @@ const ROASTS = [
 function loadData() {
   try {
     if (fs.existsSync(DATA_PATH)) {
-      const raw = fs.readFileSync(DATA_PATH, "utf8");
-      return JSON.parse(raw);
+      return JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
     }
   } catch (err) {
-    console.error("[ACTIVATE] Error reading data file:", err);
+    console.error("[AUTO-ROAST] Load error:", err);
   }
-  return { expires: 0, activatedBy: null };
+  return { expires: 0, activatedBy: null, targetID: null };
 }
 
 function saveData(data) {
   try {
     fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
   } catch (err) {
-    console.error("[ACTIVATE] Error saving data file:", err);
+    console.error("[AUTO-ROAST] Save error:", err);
   }
 }
 
 function isActive() {
   const data = loadData();
   return Boolean(data.expires && data.expires > Date.now());
-}
-
-function getRemaining() {
-  const data = loadData();
-  if (!data.expires) return 0;
-  const left = data.expires - Date.now();
-  return left > 0 ? left : 0;
 }
 
 function getRandomUniqueRoast() {
@@ -168,17 +164,17 @@ function getRandomUniqueRoast() {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-function sendMsg(api, text, threadID, messageID = null) {
+function sendMsg(api, payload, threadID, messageID = null) {
   return new Promise((resolve) => {
     const callback = (err, info) => {
-      if (err) console.error("[ACTIVATE] Send message error:", err);
+      if (err) console.error("[AUTO-ROAST] Send error:", err);
       resolve(info);
     };
 
     if (messageID) {
-      api.sendMessage(text, threadID, messageID, callback);
+      api.sendMessage(payload, threadID, messageID, callback);
     } else {
-      api.sendMessage(text, threadID, callback);
+      api.sendMessage(payload, threadID, callback);
     }
   });
 }
@@ -191,24 +187,39 @@ module.exports.handleEvent = async function ({ api, event }) {
   const cleanBody = body.trim();
 
   if (cleanBody.startsWith("/") || cleanBody.startsWith("!") || cleanBody.startsWith(".")) return;
-  if (cleanBody.length < 3) return;
+  if (cleanBody.length < 2) return;
   if (senderID === api.getCurrentUserID()) return;
   if (!isActive()) return;
+
+  const data = loadData();
+
+  if (data.targetID && senderID !== data.targetID) return;
 
   if (activeQueues.has(threadID)) return;
   activeQueues.add(threadID);
 
   try {
-    const totalCount = Math.floor(Math.random() * 3) + 4;
+    const totalCount = Math.floor(Math.random() * 3) + 3;
     for (let i = 0; i < totalCount; i++) {
       if (!isActive()) break;
       
-      const roastMessage = getRandomUniqueRoast();
-      await sendMsg(api, roastMessage, threadID);
-      await sleep(5000);
+      let roastText = getRandomUniqueRoast();
+      let payload = roastText;
+
+      if (data.targetID) {
+        payload = {
+          body: `🔥 ${roastText}`,
+          mentions: [{ id: data.targetID, tag: roastText }]
+        };
+      }
+
+      await sendMsg(api, payload, threadID);
+
+      const dynamicDelay = Math.floor(Math.random() * 2000) + 3500;
+      await sleep(dynamicDelay);
     }
   } catch (err) {
-    console.error("[ACTIVATE Event Error]:", err);
+    console.error("[AUTO-ROAST Event Error]:", err);
   } finally {
     activeQueues.delete(threadID);
   }
@@ -216,64 +227,86 @@ module.exports.handleEvent = async function ({ api, event }) {
 
 // ===== COMMAND RUN =====
 module.exports.run = async function ({ api, event, args }) {
-  const { threadID, messageID, senderID } = event;
-  const sub = (args[0] || "").toLowerCase();
+  const { threadID, messageID, senderID, mentions } = event;
+  const sub = (args[0] || "").toLowerCase().trim();
   const data = loadData();
 
-  // BOT ADMIN CHECK
   const adminList = (global.config && (global.config.ADMINBOT || global.config.NDH)) || [];
   const isAdmin = adminList.includes(senderID.toString());
 
   if (!isAdmin) {
-    return sendMsg(api, "⚠️ Admin lang ng bot ang pwedeng gumamit ng command na ito.", threadID, messageID);
+    return sendMsg(api, "🚫 Admin access required.", threadID, messageID);
   }
 
-  if (sub === "on") {
-    const expires = Date.now() + 24 * 60 * 60 * 1000;
-    data.expires = expires;
+  // DIRETSONG TURN ON KAPAG /159062577092811 LANG O /159062577092811 on
+  if (!sub || sub === "on" || sub === "1") {
+    data.expires = Date.now() + 24 * 60 * 60 * 1000;
     data.activatedBy = senderID;
     data.activatedAt = Date.now();
+    data.targetID = null;
     saveData(data);
 
     return sendMsg(
       api,
-      `🔥 GLOBAL AUTO-ROAST (WALANG PATAYAN MODE): ON\n\n` +
-      `⏱ Interval: 5 seconds per lapag\n` +
-      `🛡 Anti-Spam Queue: ACTIVE\n` +
+      `⚡ [ AUTO-ROAST SYSTEM: ON ]\n\n` +
+      `🎯 Mode: Global Auto-Roast\n` +
       `⏳ Duration: 24 Hours\n` +
-      `👑 Admin authorized session.`,
+      `🛡 Safe-Delay: ACTIVE (3-5s)\n` +
+      `👑 Admin Authorized`,
       threadID,
       messageID
     );
   }
 
-  if (sub === "off") {
+  // OFF
+  if (sub === "off" || sub === "2") {
     data.expires = 0;
+    data.targetID = null;
     saveData(data);
-    return sendMsg(api, "✅ Global auto-roast turned OFF successfully.", threadID, messageID);
+    return sendMsg(api, "🛑 Auto-Roast System is now OFF.", threadID, messageID);
   }
 
-  if (sub === "status") {
-    const left = getRemaining();
-    if (left <= 0) {
-      return sendMsg(api, "🔴 Global auto-roast is currently INACTIVE.", threadID, messageID);
+  // TARGET MODE
+  if (sub === "target" || sub === "3") {
+    const mentionedKeys = Object.keys(mentions || {});
+    if (mentionedKeys.length === 0) {
+      return sendMsg(api, "⚠️ Mag-mention ng taong i-ta-target.\nExample: /159062577092811 target @User", threadID, messageID);
     }
 
-    const hours = Math.floor(left / (1000 * 60 * 60));
-    const mins = Math.floor((left % (1000 * 60 * 60)) / (1000 * 60));
+    const targetUser = mentionedKeys[0];
+    data.expires = Date.now() + 24 * 60 * 60 * 1000;
+    data.targetID = targetUser;
+    saveData(data);
+
     return sendMsg(
       api,
-      `🔥 Global Auto-roast is ACTIVE\nTime left: ${hours}h ${mins}m\nQueue status: ${activeQueues.has(threadID) ? "BUSY (Lapag Mode)" : "READY"}`,
+      `🎯 [ TARGET LOCKDOWN ACTIVATED ]\n\n` +
+      `👤 Target User: ${mentions[targetUser]}\n` +
+      `🔥 Naka-lockdown na sa user na ito!`,
       threadID,
       messageID
     );
   }
 
-  // MALI O KULANG ANG SUBCOMMAND
-  return sendMsg(
-    api,
-    `⚠️ Invalid command option!\n\nMagagamit na options:\n• /activate on\n• /activate off\n• /activate status`,
-    threadID,
-    messageID
-  );
+  // STATUS
+  if (sub === "status" || sub === "4") {
+    if (!isActive()) {
+      return sendMsg(api, "🔴 Auto-Roast System is currently INACTIVE.", threadID, messageID);
+    }
+
+    const left = data.expires - Date.now();
+    const hours = Math.floor(left / (1000 * 60 * 60));
+    const mins = Math.floor((left % (1000 * 60 * 60)) / (1000 * 60));
+
+    return sendMsg(
+      api,
+      `⚡ [ SYSTEM STATUS ]\n\n` +
+      `🟢 Status: ONLINE\n` +
+      `⏱ Natitirang Oras: ${hours}h ${mins}m\n` +
+      `🎯 Target Mode: ${data.targetID ? `Locked on [${data.targetID}]` : "Global"}\n` +
+      `⚡ Active Queue: ${activeQueues.has(threadID) ? "BUSY" : "IDLE"}`,
+      threadID,
+      messageID
+    );
+  }
 };
