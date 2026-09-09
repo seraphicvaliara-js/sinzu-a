@@ -3,125 +3,123 @@ const path = require("path");
 
 module.exports.config = {
   name: "banat",
-  version: "14.0.0",
+  version: "12.1.0",
   hasPermission: 0,
   credits: "sinzu",
-  description: "Ethereal Serenity - Ultimate Auto-Roast & Auto-React Engine for Admin 61594240921272",
+  description: "Auto-Banat Engine with Haha Auto-React on Bot's own message (Restricted to Admin 61594240921272)",
   usePrefix: true,
   commandCategory: "Fun",
   usages:
     "• /banat on — I-ON ang global auto-banat + haha react\n" +
-    "• /banat on @mention — I-lockdown at banatan ang partikular na target\n" +
+    "• /banat on @mention — I-target ang isang tao\n" +
     "• /banat off — Patayin ang Banat Engine",
   cooldowns: 2
 };
 
-// HARDCODED ADMIN ID
 const ADMIN_ID = "61594240921272";
-
 const DATA_PATH = path.join(__dirname, "banat_config.json");
-const activeQueues = new Set();
-const lastMessageTimes = new Map();
 
-// 100+ BANAT LINES INCLUDING DUMMYLANDIA & TRASH TALK SPECIALS
-const BANAT_LISTS = [
-  "Bakit ka galit? Pangit ka na nga, mainitin pa ulo mo! 🗿",
-  "Paki-mabilis mag-type, nabubulok na 'yung replies mo sa bagal.",
-  "Dami mong sinabi pero walang may paki. Next kalaban please! 😴",
-  "Lakas mo mag-reply pero mukha ka namang ekstra sa sarili mong buhay.",
-  "Type nang type, akala mo naman may punto. Ulitin mo nga, 'di ko naintindihan kabobohan mo.",
-  "Magkano load mo paps? Sayang lang data mo sa ganyang klaseng argumento. 📉",
-  "Nawawala ka na sa wisyo ah, paki-restart muna ng utak mo bago ka humarap sa 'kin.",
-  "Ilang oras mo pinag-isipan 'yan? Kasi mukhang 2 seconds lang pinagdaanan ng utak mo.",
-  "Umiiyak ka na ba d'yan sa likod ng screen? Sige lang, ilabas mo lang 'yan. 😭",
-  "Keyboard warrior sa chat pero sa personal kulang na lang lumuhod.",
-  "Ganyan ba talaga kapag talo na? Nag-iimbento na lang ng mga sinasabi?",
-  "Pang-grade 1 'yang linyahan mo paps, taasan mo naman nang konti.",
-  "Luh, nagalit na siya! Haha paki-pula pa ng mukha mo, baka sakaling manalo ka.",
-  "Subukan mo uli, baka sa pang-100 na subok mo magkaroon na ng sense 'yang pinagsasabi mo. 💀",
-  "Sana physical memory na lang 'yang utak mo para madaling i-upgrade, sobrang kulang eh.",
-  "Mas mabilis pa mag-load 'yung 2G network kaysa sa pagproseso ng utak mo.",
-  "Tahimik ka na lang kapag wala kang maipagmamalaki, nakakahiya ka eh. 🤫",
-  "Ano 'yan, ensayo mo na 'yan sa pagiging ewan o natural talent mo talaga?",
-  "Reply ka pa, gustong-gusto mo talagang napapahiya rito 'no?",
-  "Wag ka nang lumaban, para kang nagtatapon ng hangin sa pader. 👋",
-  "Lakas mag-tapang sa chat pero 'pag tinawagan biglang offline. 😂",
-  "Nanginginig na ba 'yang daliri mo? Dami mong typo ah!",
-  "Hindi ka nakakatuwa, nakakaawa ka na paps.",
-  "Utak mo parang buffering, 99% na stock pa rin.",
-  "Sino nagturo sayo mag-chat? Balik mo na load niya, nasayang lang.",
-  "Huwag ka masyadong mag-alala, balang araw magkakaroon ka rin ng sense.",
-  "Ganyan ba talaga kapag kapos sa pansin? Nagpapapansin sa gc?",
-  "Parang wala ka namang sinasabi, ingay mo lang pakinggan.",
-  "Tigilan mo na 'yan, baka maputulan ka pa ng ugat sa leeg.",
-  "I-off mo na data mo, nakakahiya ka na masyado.",
-  "Kung sa bagay, d'yan ka naman magaling... sa pagiging ewan. 🤡",
-  "Nakikita mo ba 'yang mga sinasabi mo o pumipikit ka na lang habang nag-ta-type?",
-  "Sana all maraming libreng oras para maging abnormal.",
-  "Sayang 'yung space sa server para sa mga reply mong walang kwenta.",
-  "Huy gising! Baka akala mo panalo ka na sa lagay na 'yan?",
-  "Parang sirang plaka, paulit-ulit na lang 'yang rebuttals mo.",
-  "Wala ka na bang ibang maipukol? Nao-olats ka na oh.",
-  "Mukha kang ewan d'yan, swear.",
-  "Iiyak na 'yan! Iiyak na 'yan! 🤏",
-  "Kahit aso ko hindi matutuwa sa banat mo eh.",
-  "Ano raw? Paki-translate sa wikang may utak.",
-  "Isang malaking LOL para sa usapan natin ngayon. 😆",
-  "Tago ka muna, palamig ka muna ng ulo baka masunog 'yang kilay mo.",
-  "Sakit sa mata ng mga reply mo, paki-delete na lang.",
-  "Kala mo naman kina-cool mo 'yang reply mo eh 'no?",
-  "May award ba sa pinakamababang IQ? Baka ikaw manalo ngayon.",
-  "Pasensya ka na ah, 'di kita kayang patulan nang seryoso, nakakatawa ka kasi.",
-  "Baka gusto mong magpa-consult muna bago ka mag-chat uli?",
-  "Walang epekto 'yang banat mo, sinusubukan mo ba ako o pinalalata mo lang sarili mo?",
-  "Cringe paps, sobrang cringe.",
-  "Alam mo 'yung pakiramdam ng napapahiya? Ganyan na ganyan ka ngayon.",
-  "Sige pa, ipaglaban mo pa 'yang maling paniniwala mo.",
-  "Hindi pa ba napapagod 'yang daliri mo sa pag-type ng walang kwenta?",
-  "Pa-cute ka lang pero walang binatog.",
-  "May free trial ba 'yang utak mo? Baka expired na kasi.",
-  "Puro ka hangin, wala ka namang maipakitang ibuga.",
-  "Next topic please, nabubulok na 'tong argument mo.",
-  "Tawa kami sayo rito sa kabilang screen, tuloy mo lang!",
-  "Subukan mo kayang mag-isip muna bago mag-click ng send?",
-  "Lakas ng loob, mahina naman sa banatan.",
-  "Hahahahaha wala ka na bang maisip?",
-  "Pinipilit mo talagang maging relevant 'no?",
-  "Parang kape na pinalamig, wala nang lasa 'yang banat mo.",
-  "Sige lang, mag-react ka pa, d'yan ka naman magaling.",
-  "Sino nagpapasahod sayo para mag-mukhang ewan dito?",
-  "Kaya pala tahimik sa bahay niyo, nandito ka pala nagkakalat.",
-  "Akala ko ba matapang ka? Bakit paulit-ulit na lang linyahan mo?",
-  "Goodluck na lang sayo paps, kailangan mo ng maraming tulong.",
-  "Ilan ba kayong nag-iisip d'yan? Para kasing kalahati lang gumagana.",
-  "Gusto mo ng medalya sa kabobohan?",
-  "Kung puyat ka lang, matulog ka na. Nakakaawa ka na kasi.",
-  "Chat ka nang chat, 'di ka naman pinapansin sa bahay niyo.",
-  "Bagsak ka na sa exam, bagsak ka pa rito sa banatan. 📉",
-  "Luh siya, feeling hero sa sariling kwento.",
-  "Sana man lang kahit konting sense nilagay mo sa reply mo.",
-  "Walang kakwenta-kwenta, prangkahan lang.",
-  "Nag-iingay ka lang para mapansin ka eh 'no?",
-  "Galit na galit, gusto manakit? Kaso hanggang chat ka lang.",
-  "Luh, napipikon na siya! Pa-kiss nga para kumalma ka. 😘",
-  "Huwag ka nang pumalag, mas lalo ka lang nagmumukhang ewan.",
-  "Ang hangin naman dito, may nag-re-reply kasing puro hangin lang laman.",
-  "Kahit sinong makakabasa nito, ikaw 'yung pagtatawanan.",
-  "I-log out mo na 'yang dummy mo, gabi na. May pasok ka pa bukas.",
-  "Lakas mag-troll sa dummy account, takot naman ipakita ang tunay na mukha! 🤡",
-  "Ilang dummy account pa ba gagamitin mo bago ka matutong mag-argumento?",
-  "RPW warrior amputa, paki-drop nga tunay na profile mo kung matapang ka.",
-  "Dummylandia royalty ka ba? Bakit parang hari ka ng kabobohan doon?",
-  "Troll account na nga lang gamit mo, olats ka pa rin sa usapan? Aba matindi.",
-  "Dummylandia trashtalker starter pack: galit, puyat, at walang ambag sa lipunan. 🗿",
-  "Paki-tag 'yung main account mo, ipapahiya natin doon para damay ang pamilya.",
-  "Sabi ng dummy account mo 'matapang' daw siya, kaso nahuli kong iyakin.",
-  "Cringe mo paps, bumalik ka na lang sa RPW doon ka mag-drama. 🎭",
-  "Chat war champion daw siya sa Dummylandia... panalo sa ingay, talo sa punto.",
-  "Gawa ka uli ng 10 accounts, i-mention mo sarili mo para magmukhang marami kayo.",
-  "Troll lang kaya mong gawin kasi 'di ka kayang seryosohin ng mga tao sa paligid mo.",
-  "Puro ka banat, kaso mas mabilis pa mag-expire 'yang account mo kaysa sa validity ng utak mo.",
-  "GG Dummylandia warrior! Ulitin mo uli bukas kapag may bago ka nang script. 👋🔥"
+const PHILOSOPHICAL_BANAT = [
+  "Your argument possesses the structural integrity of a philosophical premise that collapsed before reaching its own conclusion. 🏛️🏚️",
+  "I would challenge your reasoning, but I fear that would constitute an unfair intellectual advantage. 🧠📉",
+  "Your interpretation of reality appears to be an unfortunate negotiation between ignorance and excessive confidence. 🤡✨",
+  "Even Socrates would have stopped asking questions after realizing there was nothing intellectually recoverable here. 🗿❌",
+  "Your theory is fascinating in the same way a logical contradiction is fascinating: mostly because it should not exist. 🌀❓",
+  "I admire your confidence; it is remarkably independent from evidence, coherence, or epistemic responsibility. 🎯🕳️",
+  "If ignorance were an academic discipline, you would apparently be defending a doctoral dissertation. 🎓🗑️",
+  "Your conclusion arrived with tremendous confidence considering its premises never actually left the station. 🚂💨",
+  "I attempted to understand your philosophy, but every conceptual pathway eventually terminated in intellectual negligence. 🚷🕳️",
+  "Your argument is not controversial; it is merely insufficiently acquainted with reality. 🌍🚫",
+  "Nietzsche would probably call your worldview nihilistic, but even nihilism requires more substance than this. 📜💨",
+  "Your logic resembles a philosophical Möbius strip: endlessly circulating without ever arriving at a meaningful point. 🔄🤷‍♂️",
+  "I would call your statement profound, but profundity requires descending beneath the surface first. 🌊🪨",
+  "You have successfully transformed an absence of knowledge into an impressive display of certainty. 🏆🤦‍♂️",
+  "Your reasoning has all the sophistication of a syllogism written during a power outage. 🕯️❌",
+  "Kant spent his life examining the limits of human reason. Apparently, you decided to demonstrate them personally. 📖🧱",
+  "Your epistemology seems to operate on the revolutionary principle that being convinced is equivalent to being correct. 💡🚫",
+  "I have seen stronger premises in arguments made by people who had not yet discovered punctuation. 📝💥",
+  "Your worldview is remarkably ambitious for something constructed almost entirely from assumptions. 🏰🎈",
+  "You don't possess an unpopular opinion; you possess an underdeveloped one. 🐣🛑",
+  "Your argument desperately wants to become philosophy, but unfortunately it remains merely vocabulary arranged with confidence. 🎭📜",
+  "If Aristotle encountered this reasoning, he might invent an entirely new category called 'unfortunate syllogism.' 🏛️🤦",
+  "Your intellectual framework has more gaps than a metaphysical theory written on disappearing ink. 🖊️💨",
+  "I understand your perspective. I simply cannot locate the evidence that would justify understanding it as correct. 🔍🕳️",
+  "Your confidence is genuinely impressive considering your argument has been empirically unemployed since its conception. 📉🛑",
+  "Descartes said, 'I think, therefore I am.' Your reasoning appears to have skipped directly from 'I am' to 'therefore I am correct.' 💭🤷‍♂️",
+  "Your philosophical position demonstrates an extraordinary commitment to conclusions liberated from premises. 🕊️⛓️",
+  "I would deconstruct your argument, but it appears to have already dismantled itself. 🧩💥",
+  "Your reasoning is not circular; it is an entire philosophical amusement park dedicated to going nowhere. 🎡🎪",
+  "The tragedy of your argument is not that it is controversial, but that it believes controversy is a substitute for validity. 🎭❌",
+  "Your statement has the linguistic appearance of intelligence without the inconvenient burden of actually containing it. 🗣️🫧",
+  "I suspect your philosophy was developed by repeatedly confusing intuition with evidence. 🔮📉",
+  "Your conceptual framework is so fragile that one reasonable question could cause an ontological catastrophe. 🏗️💥",
+  "You speak as though certainty were a form of evidence. Unfortunately, reality did not approve that methodological revision. 📜🛑",
+  "Your argument could benefit from Occam’s razor, although I suspect it would simply remove everything. 🪒💨",
+  "Hume would question your assumptions; I would question why your assumptions were invited to the discussion. 🚪👋",
+  "Your reasoning contains enough logical fallacies to qualify as an introductory course in what not to do. 📚⚠️",
+  "You have achieved something remarkable: a conclusion that contradicts its premises while somehow sounding proud of itself. 🦚🤡",
+  "Your argument is an epistemological house of cards wearing a suit. 🃏👔",
+  "I appreciate your attempt at intellectual discourse, although discourse generally requires two participants capable of producing coherent propositions. 🗣️🎙️",
+  "Your opinion is not necessarily wrong because it is unpopular; it is wrong because its foundations appear to have been constructed from decorative nonsense. 🎨🗑️",
+  "You have mistaken rhetorical confidence for philosophical rigor, and the distinction is doing considerable damage to your argument. 📢💥",
+  "Your reasoning resembles an academic paper whose references were replaced with vibes. 📄✨",
+  "If logic were a language, your argument would be communicating entirely through mistranslation. 🗣️❌",
+  "Your thesis has an impressive amount of terminology for something with almost no discernible thesis. 📚🕳️",
+  "I would ask you to substantiate that claim, but I suspect the evidence is currently experiencing an existential crisis. 🕵️‍♂️🌀",
+  "Your argument is intellectually ambitious in the same way a paper airplane is aeronautically ambitious. ✈️📄",
+  "You have somehow managed to make ignorance sound like a personal philosophical doctrine. 📜🤡",
+  "Your interpretation of the world appears to have been assembled from assumptions that never survived peer review. 🔬🚮",
+  "There is something almost poetic about your confidence: it persists despite every available indication that it should not. 🎭📉",
+  "Your philosophy appears to confuse complexity with intelligence, which explains why every sentence arrives wearing unnecessary academic clothing. 🧥🧠",
+  "Even your contradictions seem uncertain about what they are contradicting. ❓🔄",
+  "Your premises are so questionable that Socrates would probably respond by simply staring at you. 🗿👁️",
+  "You don't need a counterargument; your argument already contains its own rebuttal. 🪞💥",
+  "Your intellectual methodology appears to be 'assert first, rationalize later.' 🎯🏹",
+  "I have encountered better epistemological foundations in arguments written on bathroom walls. 🧱🎨",
+  "Your conclusion is impressively definitive for something supported by absolutely nothing definitive. 🏛️💨",
+  "Your argument demonstrates the fascinating phenomenon of intellectual overconfidence surviving without intellectual infrastructure. 🏗️🕳️",
+  "You speak of facts with the enthusiasm of someone who has recently discovered that facts exist but has not yet learned how to locate them. 🔎🤷‍♂️",
+  "Your reasoning has the philosophical depth of a puddle and the confidence of an ocean. 🌊🕳️",
+  "If William Shakespeare reviewed your argument, he might finally understand why silence is sometimes the superior literary device. 🎭🤫",
+  "Your statement is so conceptually confused that even a dictionary would request clarification. 📖❓",
+  "You have mistaken having an explanation for having a valid explanation. 🗣️❌",
+  "Your argument does not merely lack nuance; it appears to have declared war upon nuance itself. ⚔️🧠",
+  "The sheer confidence with which you present unsupported claims is almost enough to distract from the fact that they remain unsupported. 🎪✨",
+  "Your intellectual framework appears to have been constructed backward: conclusion first, justification whenever convenient. 🔁🏗️",
+  "Your theory is an extraordinary example of how terminology can be used to camouflage an absence of substance. 🎭📦",
+  "I would call your argument sophisticated, but sophistication without coherence is merely elaborate confusion. 🎩🌀",
+  "Your reasoning has the consistency of a philosopher arguing with his own reflection and somehow losing. 🪞🥊",
+  "Your perspective is fascinating because it demonstrates how certainty can survive completely independently of understanding. 🧠🕳️",
+  "You have produced an argument so semantically inflated that removing the jargon would leave approximately three confused words. 🎈📍",
+  "Your philosophical vocabulary is impressive; unfortunately, vocabulary and comprehension are separate phenomena. 📚🗣️",
+  "I cannot determine whether your argument is intentionally paradoxical or simply unaware of its own contradictions. 🌀🤷‍♂️",
+  "Your premises have apparently entered witness protection because I cannot find them anywhere in your conclusion. 🕵️‍♂️📜",
+  "You treat logical consistency as though it were an optional subscription service. 💳❌",
+  "Your argument has the rare quality of sounding profound until someone actually examines what you said. 🔬💨",
+  "If intellectual humility were currency, your argument would currently be bankrupt. 💸🧠",
+  "Your theory does not challenge conventional wisdom; it merely challenges conventional literacy. 📖❌",
+  "You have achieved a remarkable synthesis of arrogance, ambiguity, and unsupported inference. 🏆🤡",
+  "Your reasoning would make an excellent philosophical specimen for researchers studying the consequences of excessive certainty. 🔬📉",
+  "I would engage with your argument seriously, but seriousness requires something here that your premises have conspicuously failed to provide. 🎭🚫",
+  "Your conclusion appears to have escaped from a completely different argument and wandered into this conversation by accident. 🏃‍♂️💨",
+  "Your understanding of causality is so creative that reality itself would probably request editorial revisions. 📝🌍",
+  "You have constructed an intellectual labyrinth where every path leads back to the same unsupported assertion. 🌀🧱",
+  "Your argument is not deep; it is simply difficult to understand because clarity was apparently excluded from the methodology. 🌫️📜",
+  "Your reasoning possesses the fascinating ability to become less convincing every time it is explained. 📉🗣️",
+  "You seem to regard disagreement as evidence of persecution rather than an invitation to reconsider your premises. 🛡️🤡",
+  "Your argument has enough rhetorical decoration to make an empty room look intellectually furnished. 🛋️💨",
+  "Even your hypothetical scenarios require more suspension of disbelief than most works of fiction. 🦄📚",
+  "Your interpretation of logic appears to be highly theoretical, particularly because it has never been observed in practice. 🧪💥",
+  "You speak with the authority of an encyclopedia and reason with the reliability of a fortune cookie. 🥠📖",
+  "Your philosophical position is remarkably resilient; no amount of evidence appears capable of making contact with it. 🛡️🧠",
+  "You have confused intellectual independence with intellectual isolation. 🏝️🛑",
+  "Your argument is a magnificent demonstration that sophisticated vocabulary cannot compensate for primitive reasoning. 🎩🦴",
+  "I would dismantle your thesis, but doing so would be less a debate and more an archaeological excavation. ⛏️🗿",
+  "Your reasoning has reached such an advanced stage of abstraction that it has successfully detached itself from reality. 🎈☁️",
+  "The problem with your argument is not its complexity; it is that complexity appears to be doing all the intellectual labor. ⚙️💨",
+  "You possess an extraordinary talent for turning simple questions into unnecessarily complicated demonstrations of misunderstanding. 🌀📢",
+  "Your claim sounds almost revolutionary until one notices that it is merely incorrect with unusually expensive vocabulary. 🏷️💸",
+  "I understand that you consider this a theory, but calling an unsupported conclusion a theory does not magically promote it into an intellectual achievement. 🪄📜"
 ];
 
 function loadData() {
@@ -132,7 +130,7 @@ function loadData() {
   } catch (err) {
     console.error("[BANAT-ENGINE] Load error:", err);
   }
-  return { active: false, targetID: null, targetName: null };
+  return { active: false, targetID: null, targetName: null, expireAt: null };
 }
 
 function saveData(data) {
@@ -145,6 +143,13 @@ function saveData(data) {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+function getTypingDelay(text) {
+  const chars = text.length;
+  const base = Math.floor(chars / 10) * 100;
+  const random = Math.floor(Math.random() * 400) + 300;
+  return Math.min(base + random, 1800);
+}
+
 // ===== EVENT HANDLER =====
 module.exports.handleEvent = async function ({ api, event }) {
   if (!event || event.type !== "message" || !event.body) return;
@@ -152,61 +157,49 @@ module.exports.handleEvent = async function ({ api, event }) {
   const { threadID, messageID, senderID, body } = event;
   const cleanBody = body.trim();
 
-  // Huwag pansinin ang mga command prefix at sariling message ng bot
   if (cleanBody.startsWith("/") || cleanBody.startsWith("!") || cleanBody.startsWith(".")) return;
   if (senderID === api.getCurrentUserID()) return;
 
   const data = loadData();
   if (!data.active) return;
 
-  // KAPAG MAY TARGET: Kung hindi ang target ang nag-chat, i-bypass
+  if (data.expireAt && Date.now() > data.expireAt) {
+    data.active = false;
+    data.targetID = null;
+    data.targetName = null;
+    data.expireAt = null;
+    saveData(data);
+    return;
+  }
+
   if (data.targetID && senderID !== data.targetID) return;
 
-  // 1. AUTO HAHA REACT (😆) REKTA SA CHAT NG TARGET / KALABAN
-  api.setMessageReaction("😆", messageID, (err) => {
-    if (err) console.error("[HAHA-REACT Error]:", err);
-  }, true);
-
-  // 2. DYNAMIC SPAM DETECTION
-  const now = Date.now();
-  const lastTime = lastMessageTimes.get(senderID) || 0;
-  const timeDiff = now - lastTime;
-  lastMessageTimes.set(senderID, now);
-
-  // Kapag nag-chat nang mabilis (mas mababa sa 1.5s), 5s interval. Kapag normal, 2-3s interval.
-  const isSpamming = timeDiff < 1500;
-  const delayMs = isSpamming ? 5000 : Math.floor(Math.random() * 1000) + 2000;
-
-  // 3. AUTO BANAT REPLY
-  if (activeQueues.has(threadID)) return;
-  activeQueues.add(threadID);
-
   try {
-    const repeatCount = Math.floor(Math.random() * 2) + 2;
+    const chosenText = PHILOSOPHICAL_BANAT[Math.floor(Math.random() * PHILOSOPHICAL_BANAT.length)];
 
-    for (let i = 0; i < repeatCount; i++) {
-      if (!loadData().active) break;
-
-      const chosenText = BANAT_LISTS[Math.floor(Math.random() * BANAT_LISTS.length)];
-      
-      let payload = chosenText;
-      if (data.targetID && data.targetName) {
-        payload = {
-          body: `🔥 @${data.targetName} ${chosenText}`,
-          mentions: [{ id: data.targetID, tag: `@${data.targetName}` }]
-        };
-      }
-
-      api.sendMessage(payload, threadID, (err) => {
-        if (err) console.error("[BANAT Send Error]:", err);
-      });
-
-      await sleep(delayMs);
+    let payload = chosenText;
+    if (data.targetID && data.targetName) {
+      payload = {
+        body: `🔥 @${data.targetName} ${chosenText}`,
+        mentions: [{ id: data.targetID, tag: `@${data.targetName}` }]
+      };
     }
+
+    const delay = getTypingDelay(typeof payload === "string" ? payload : payload.body);
+    await sleep(delay);
+
+    api.sendMessage(payload, threadID, (err, info) => {
+      if (err) return console.error("[BANAT Send Error]:", err);
+
+      if (info && info.messageID) {
+        api.setMessageReaction("😆", info.messageID, (reactErr) => {
+          if (reactErr) console.error("[HAHA-REACT Error]:", reactErr);
+        }, true);
+      }
+    }, messageID);
+
   } catch (err) {
     console.error("[BANAT-ENGINE Event Error]:", err);
-  } finally {
-    activeQueues.delete(threadID);
   }
 };
 
@@ -215,27 +208,25 @@ module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID, mentions } = event;
   const sub = (args[0] || "").toLowerCase().trim();
 
-  // STRICT ADMIN ACCESS CONTROL (Hardcoded Owner ID: 61594240921272)
   if (senderID.toString() !== ADMIN_ID) {
-    return api.sendMessage(`🚫 Admin access required (Owner: sinzu / ID: ${ADMIN_ID}).`, threadID, messageID);
+    return api.sendMessage("🚫 Admin access required (Owner: sinzu / ID: 61594240921272).", threadID, messageID);
   }
 
   const data = loadData();
 
-  // COMMAND: /banat off
   if (sub === "off") {
     data.active = false;
     data.targetID = null;
     data.targetName = null;
+    data.expireAt = null;
     saveData(data);
-    return api.sendMessage("🕧🕧 [ GAME OVER ] BANAT ENGINE & HAHA-REACT IS NOW OFF! 🤝", threadID, messageID);
+    return api.sendMessage("🕧 [ GAME OVER ] BANAT ENGINE IS NOW OFF!", threadID, messageID);
   }
 
-  // COMMAND: /banat on O /banat on @mention
   if (sub === "on") {
     const mentionedKeys = Object.keys(mentions || {});
-
     data.active = true;
+    data.expireAt = Date.now() + (24 * 60 * 60 * 1000);
 
     if (mentionedKeys.length > 0) {
       const targetID = mentionedKeys[0];
@@ -245,12 +236,12 @@ module.exports.run = async function ({ api, event, args }) {
       saveData(data);
 
       return api.sendMessage(
-        `👑 [ BANAT + HAHA REACT ACTIVATED ]\n\n` +
+        `👑 [ INTELLECTUAL ROAST ACTIVATED ]\n\n` +
         `🎯 Target: ${mentions[targetID]}\n` +
-        `🔥 Status: LOCKED ON TARGET\n` +
-        `😆 Auto-React: Direct sa chat ng kalaban\n` +
-        `⚡ Dynamic Interval: 5s (Spam Mode) / 2-3s (Normal Mode)\n` +
-        `👑 Authorized Admin: sinzu (${ADMIN_ID})`,
+        `😆 Auto-React: On bot's own message\n` +
+        `⏳ Duration: 24 hours\n` +
+        `📩 Mode: 1 Text = 1 Reply (Human speed)\n` +
+        `👑 Admin: sinzu`,
         threadID,
         messageID
       );
@@ -260,24 +251,23 @@ module.exports.run = async function ({ api, event, args }) {
       saveData(data);
 
       return api.sendMessage(
-        `👑 [ GLOBAL BANAT + HAHA REACT ACTIVATED ]\n\n` +
-        `🌐 Mode: Global (Lahat ng mag-chat)\n` +
-        `😆 Auto-React: Direct sa chat ng nag-send\n` +
-        `⚡ Dynamic Interval: 5s (Spam Mode) / 2-3s (Normal Mode)\n` +
-        `👑 Authorized Admin: sinzu (${ADMIN_ID})`,
+        `👑 [ GLOBAL INTELLECTUAL ROAST ACTIVATED ]\n\n` +
+        `🌐 Mode: Global\n` +
+        `😆 Auto-React: On bot's own message\n` +
+        `⏳ Duration: 24 hours\n` +
+        `📩 Mode: 1 Text = 1 Reply (Human speed)\n` +
+        `👑 Admin: sinzu`,
         threadID,
         messageID
       );
     }
   }
 
-  // DEFAULT HELP MENU
   return api.sendMessage(
-    `👑👑 OWNER: sinzu (${ADMIN_ID}) 👑👑\n` +
-    `📌 PAANO GAMITIN:\n\n` +
-    `• /banat on (Global mode - lahat ng mag-chat sa GC babanatan at lalagyan ng react)\n` +
-    `• /banat on @mention (Target mode - ire-lockdown ang isang specific user)\n` +
-    `• /banat off (I-OFF ang bot)`,
+    `👑 OWNER: sinzu (${ADMIN_ID})\n\n` +
+    `• /banat on\n` +
+    `• /banat on @mention\n` +
+    `• /banat off`,
     threadID,
     messageID
   );
