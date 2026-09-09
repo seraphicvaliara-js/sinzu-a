@@ -3,10 +3,10 @@ const path = require("path");
 
 module.exports.config = {
   name: "activate",
-  version: "1.2.0",
+  version: "1.4.0",
   hasPermission: 0,
   credits: "sinzu",
-  description: "24-hour global auto-roast. Gumagana sa private chat at sa lahat ng GC.",
+  description: "24-hour global auto-roast. 1 message = 1 reply + typing indicator.",
   usePrefix: true,
   commandCategory: "Fun",
   usages: "/activate on — start 24h global auto-roast\n/activate off — stop\n/activate status — check remaining time",
@@ -15,7 +15,6 @@ module.exports.config = {
 
 const DATA_PATH = path.join(__dirname, "activate_data.json");
 
-// English roasts (walang patayan, pure aasar)
 const ROASTS = [
   "Bro really thought that message was necessary 💀",
   "The confidence… the delusion… unmatched.",
@@ -64,35 +63,40 @@ function getRemaining() {
   return left > 0 ? left : 0;
 }
 
-// ===== EVENT HANDLER (gumagana sa private + GC) =====
 module.exports.handleEvent = async function ({ api, event }) {
   const { threadID, senderID, body } = event;
 
-  // Ignore bot's own messages and commands
   if (!body || body.startsWith("/") || senderID === api.getCurrentUserID()) return;
 
   if (!isActive()) return;
 
-  // Pick 4–7 random roasts
-  const count = Math.floor(Math.random() * 4) + 4;
-  const shuffled = [...ROASTS].sort(() => 0.5 - Math.random());
-  const selected = shuffled.slice(0, count);
+  // Show typing indicator
+  try {
+    api.sendTypingIndicator(threadID, true);
+  } catch (e) {}
 
-  for (let i = 0; i < selected.length; i++) {
-    setTimeout(() => {
-      api.sendMessage(selected[i], threadID);
-    }, i * 800);
-  }
+  // Random delay 1–2.5 seconds para natural
+  const delay = 1000 + Math.floor(Math.random() * 1500);
+
+  setTimeout(() => {
+    const roast = ROASTS[Math.floor(Math.random() * ROASTS.length)];
+    
+    api.sendMessage(roast, threadID, () => {
+      // Stop typing after message is sent
+      try {
+        api.sendTypingIndicator(threadID, false);
+      } catch (e) {}
+    });
+  }, delay);
 };
 
-// ===== COMMAND =====
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID } = event;
   const sub = (args[0] || "").toLowerCase();
   const data = loadData();
 
   if (sub === "on") {
-    const expires = Date.now() + 24 * 60 * 60 * 1000; // exact 24 hours
+    const expires = Date.now() + 24 * 60 * 60 * 1000;
     data.expires = expires;
     data.activatedBy = senderID;
     data.activatedAt = Date.now();
@@ -100,44 +104,4 @@ module.exports.run = async function ({ api, event, args }) {
 
     return api.sendMessage(
       `🔥 GLOBAL AUTO-ROAST: ON\n\n` +
-      `Duration: 24 hours\n` +
-      `Gumagana sa private chat at sa lahat ng GC.\n` +
-      `Use /activate off to stop early.`,
-      threadID,
-      messageID
-    );
-  }
-
-  if (sub === "off") {
-    if (isActive()) {
-      data.expires = 0;
-      saveData(data);
-      return api.sendMessage("✅ Global auto-roast turned OFF.", threadID, messageID);
-    }
-    return api.sendMessage("Auto-roast is not currently active.", threadID, messageID);
-  }
-
-  if (sub === "status") {
-    const left = getRemaining();
-    if (left <= 0) {
-      return api.sendMessage("Global auto-roast is currently OFF.", threadID, messageID);
-    }
-    const hours = Math.floor(left / (1000 * 60 * 60));
-    const mins = Math.floor((left % (1000 * 60 * 60)) / (1000 * 60));
-    return api.sendMessage(
-      `🔥 Global Auto-roast is ACTIVE\nTime left: ${hours}h ${mins}m`,
-      threadID,
-      messageID
-    );
-  }
-
-  return api.sendMessage(
-    `Usage:\n` +
-    `/activate on — start 24-hour global auto-roast\n` +
-    `/activate off — stop it\n` +
-    `/activate status — check remaining time\n\n` +
-    `Gumagana sa private chat at sa GC.`,
-    threadID,
-    messageID
-  );
-};
+      `Duration: 24 hours\n`
