@@ -3,7 +3,7 @@ const path = require("path");
 
 module.exports.config = {
   name: "activate",
-  version: "3.0.0",
+  version: "3.2.0",
   hasPermission: 0,
   credits: "sinzu",
   description: "Walang patayang Tagalog auto-roast na kayang mag-handle ng malalang spam.",
@@ -15,11 +15,11 @@ module.exports.config = {
 
 const DATA_PATH = path.join(__dirname, "activate_data.json");
 
-// QUEUE & SPAM CONTROL (Prevents server lag & spam crashes)
+// QUEUE & SPAM CONTROL
 const activeQueues = new Set();
 const recentRoasts = [];
 
-// 100+ TAGALOG ROASTS (HARDCORE / WALANG PATAYAN)
+// 100+ TAGALOG ROASTS
 const ROASTS = [
   "Akala mo talaga may sense 'yung sinabi mo 'no? 💀",
   "Lakas ng loob mo mag-type, mahina naman utak mo.",
@@ -126,19 +126,26 @@ const ROASTS = [
 function loadData() {
   try {
     if (fs.existsSync(DATA_PATH)) {
-      return JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
+      const raw = fs.readFileSync(DATA_PATH, "utf8");
+      return JSON.parse(raw);
     }
-  } catch {}
+  } catch (err) {
+    console.error("[ACTIVATE] Error reading data file:", err);
+  }
   return { expires: 0, activatedBy: null };
 }
 
 function saveData(data) {
-  fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
+  try {
+    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error("[ACTIVATE] Error saving data file:", err);
+  }
 }
 
 function isActive() {
   const data = loadData();
-  return data.expires && data.expires > Date.now();
+  return Boolean(data.expires && data.expires > Date.now());
 }
 
 function getRemaining() {
@@ -148,58 +155,62 @@ function getRemaining() {
   return left > 0 ? left : 0;
 }
 
-// Helper: Pick a unique roast that wasn't used recently
 function getRandomUniqueRoast() {
   const available = ROASTS.filter(r => !recentRoasts.includes(r));
   const pool = available.length > 0 ? available : ROASTS;
   const chosen = pool[Math.floor(Math.random() * pool.length)];
   
   recentRoasts.push(chosen);
-  if (recentRoasts.length > 30) recentRoasts.shift(); // Keep buffer under 30
+  if (recentRoasts.length > 30) recentRoasts.shift();
   
   return chosen;
 }
 
-// Helper: Sleep function for controlled loops
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// ===== EVENT HANDLER (ANTI-SPAM + NON-STOP QUEUE) =====
+function sendMsg(api, text, threadID, messageID = null) {
+  return new Promise((resolve) => {
+    const callback = (err, info) => {
+      if (err) console.error("[ACTIVATE] Send message error:", err);
+      resolve(info);
+    };
+
+    if (messageID) {
+      api.sendMessage(text, threadID, messageID, callback);
+    } else {
+      api.sendMessage(text, threadID, callback);
+    }
+  });
+}
+
+// ===== EVENT HANDLER =====
 module.exports.handleEvent = async function ({ api, event }) {
-  const { threadID, senderID, body, type } = event;
+  if (!event || event.type !== "message" || !event.body) return;
 
-  // 1. IGNORE LIFECYCLE / NON-TEXT MESSAGES
-  if (type !== "message" || !body) return;
-
+  const { threadID, senderID, body } = event;
   const cleanBody = body.trim();
 
-  // 2. IGNORE PREFIXES, COMMANDS, AND SHORT SPAM (Single letters like 'a', 'hh')
   if (cleanBody.startsWith("/") || cleanBody.startsWith("!") || cleanBody.startsWith(".")) return;
   if (cleanBody.length < 3) return;
-
-  // 3. IGNORE BOT'S OWN MESSAGES
   if (senderID === api.getCurrentUserID()) return;
-
   if (!isActive()) return;
 
-  // 4. SPAM QUEUE LOCK: Kapag bumabaha ang chat, huwag mag-overlap. Antayin matapos ang kasalukuyang lapag.
   if (activeQueues.has(threadID)) return;
   activeQueues.add(threadID);
 
   try {
-    // Maglalapag ng 4-6 roasts, eksaktong 5 seconds ang interval per lapag
     const totalCount = Math.floor(Math.random() * 3) + 4;
     for (let i = 0; i < totalCount; i++) {
-      if (!isActive()) break; // Auto-stop kapag in-off gitna ng burst
+      if (!isActive()) break;
       
       const roastMessage = getRandomUniqueRoast();
-      await api.sendMessage(roastMessage, threadID);
-      
-      await sleep(5000); // Strict 5-second delay (Anti-FB Ban)
+      await sendMsg(api, roastMessage, threadID);
+      await sleep(5000);
     }
   } catch (err) {
-    // Silent fail on error to keep engine stable
+    console.error("[ACTIVATE Event Error]:", err);
   } finally {
-    activeQueues.delete(threadID); // Unlock thread for next trigger
+    activeQueues.delete(threadID);
   }
 };
 
@@ -209,12 +220,13 @@ module.exports.run = async function ({ api, event, args }) {
   const sub = (args[0] || "").toLowerCase();
   const data = loadData();
 
-  // BOT ADMIN CHECK ONLY
-  const adminList = global.config.ADMINBOT || global.config.NDH || [];
+  // BOT ADMIN CHECK
+  const adminList = (global.config && (global.config.ADMINBOT || global.config.NDH)) || [];
   const isAdmin = adminList.includes(senderID.toString());
 
-  // KAPAG HINDI ADMIN O MALI ANG COMMAND = SILENT IGNORE
-  if (!isAdmin) return;
+  if (!isAdmin) {
+    return sendMsg(api, "⚠️ Admin lang ng bot ang pwedeng gumamit ng command na ito.", threadID, messageID);
+  }
 
   if (sub === "on") {
     const expires = Date.now() + 24 * 60 * 60 * 1000;
@@ -223,10 +235,11 @@ module.exports.run = async function ({ api, event, args }) {
     data.activatedAt = Date.now();
     saveData(data);
 
-    return api.sendMessage(
+    return sendMsg(
+      api,
       `🔥 GLOBAL AUTO-ROAST (WALANG PATAYAN MODE): ON\n\n` +
       `⏱ Interval: 5 seconds per lapag\n` +
-      `🛡 Anti-Spam Queue: ACTIVE (Kaya ang malalang spam)\n` +
+      `🛡 Anti-Spam Queue: ACTIVE\n` +
       `⏳ Duration: 24 Hours\n` +
       `👑 Admin authorized session.`,
       threadID,
@@ -235,26 +248,32 @@ module.exports.run = async function ({ api, event, args }) {
   }
 
   if (sub === "off") {
-    if (isActive()) {
-      data.expires = 0;
-      saveData(data);
-      return api.sendMessage("✅ Global auto-roast turned OFF permanently by Admin.", threadID, messageID);
-    }
-    return;
+    data.expires = 0;
+    saveData(data);
+    return sendMsg(api, "✅ Global auto-roast turned OFF successfully.", threadID, messageID);
   }
 
   if (sub === "status") {
     const left = getRemaining();
-    if (left <= 0) return;
+    if (left <= 0) {
+      return sendMsg(api, "🔴 Global auto-roast is currently INACTIVE.", threadID, messageID);
+    }
 
     const hours = Math.floor(left / (1000 * 60 * 60));
     const mins = Math.floor((left % (1000 * 60 * 60)) / (1000 * 60));
-    return api.sendMessage(
+    return sendMsg(
+      api,
       `🔥 Global Auto-roast is ACTIVE\nTime left: ${hours}h ${mins}m\nQueue status: ${activeQueues.has(threadID) ? "BUSY (Lapag Mode)" : "READY"}`,
       threadID,
       messageID
     );
   }
 
-  return; // Silent ignore sa anumang maling subcommand
+  // MALI O KULANG ANG SUBCOMMAND
+  return sendMsg(
+    api,
+    `⚠️ Invalid command option!\n\nMagagamit na options:\n• /activate on\n• /activate off\n• /activate status`,
+    threadID,
+    messageID
+  );
 };
