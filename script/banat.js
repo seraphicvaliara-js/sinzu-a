@@ -3,14 +3,14 @@ const path = require("path");
 
 module.exports.config = {
   name: "banat",
-  version: "12.1.0",
+  version: "13.0.0",
   hasPermission: 0,
   credits: "sinzu",
-  description: "Auto-Banat Engine with Haha Auto-React on Bot's own message (Restricted to Admin 61594240921272)",
+  description: "Auto-Banat Engine with Anti-Spam Buffer, Number Counter Interceptor, and No Time Limit",
   usePrefix: true,
   commandCategory: "Fun",
   usages:
-    "• /banat on — I-ON ang global auto-banat + haha react\n" +
+    "• /banat on — I-ON ang global auto-banat\n" +
     "• /banat on @mention — I-target ang isang tao\n" +
     "• /banat off — Patayin ang Banat Engine",
   cooldowns: 2
@@ -18,6 +18,9 @@ module.exports.config = {
 
 const ADMIN_ID = "61594240921272";
 const DATA_PATH = path.join(__dirname, "banat_config.json");
+
+// Memory map para sa Anti-Spam timer per user
+const userSpamTimers = new Map();
 
 const PHILOSOPHICAL_BANAT = [
   "Your argument possesses the structural integrity of a philosophical premise that collapsed before reaching its own conclusion. 🏛️🏚️",
@@ -122,6 +125,13 @@ const PHILOSOPHICAL_BANAT = [
   "I understand that you consider this a theory, but calling an unsupported conclusion a theory does not magically promote it into an intellectual achievement. 🪄📜"
 ];
 
+const NUMBER_INTERCEPT_RESPONSES = [
+  "🛑 Putol ang bilang mo. Tigil mo na 'yang resibo, hindi ‘yan gagana rito. 🚫",
+  "📊 Akala mo makakabuo ka ng 1-100? Cut off agad 'yang counting sequence mo. ✂️",
+  "🤡 Subukan mo pang mag-spam ng numero, sirang-sira pa rin 'yang bilang mo. 🛑",
+  "📉 Stop right there. Grounded ang counting attempts mo dito. ❌"
+];
+
 function loadData() {
   try {
     if (fs.existsSync(DATA_PATH)) {
@@ -130,7 +140,7 @@ function loadData() {
   } catch (err) {
     console.error("[BANAT-ENGINE] Load error:", err);
   }
-  return { active: false, targetID: null, targetName: null, expireAt: null };
+  return { active: false, targetID: null, targetName: null };
 }
 
 function saveData(data) {
@@ -141,13 +151,16 @@ function saveData(data) {
   }
 }
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+// Check kung ang message ay purong numero, 1-100 counting pattern, o dummy resibo
+function isCountingOrNumberSpam(text) {
+  const clean = text.trim();
+  // RegEx para ma-detect kung puro number o pattern na #1, 1., 2.. etc.
+  return /^\d+$/.test(clean) || /^#?\d+[\.\-\)]?$/.test(clean);
+}
 
-function getTypingDelay(text) {
-  const chars = text.length;
-  const base = Math.floor(chars / 10) * 100;
-  const random = Math.floor(Math.random() * 400) + 300;
-  return Math.min(base + random, 1800);
+// Random delay na 2 to 3 seconds (Human Speed)
+function getHumanDelay() {
+  return Math.floor(Math.random() * 1000) + 2000;
 }
 
 // ===== EVENT HANDLER =====
@@ -157,50 +170,59 @@ module.exports.handleEvent = async function ({ api, event }) {
   const { threadID, messageID, senderID, body } = event;
   const cleanBody = body.trim();
 
+  // Huwag mag-reply sa commands o sa sariling message ng bot
   if (cleanBody.startsWith("/") || cleanBody.startsWith("!") || cleanBody.startsWith(".")) return;
   if (senderID === api.getCurrentUserID()) return;
 
   const data = loadData();
   if (!data.active) return;
 
-  if (data.expireAt && Date.now() > data.expireAt) {
-    data.active = false;
-    data.targetID = null;
-    data.targetName = null;
-    data.expireAt = null;
-    saveData(data);
-    return;
-  }
-
+  // Kung may naka-target at hindi iyon ang nag-send, huwag mag-reply
   if (data.targetID && senderID !== data.targetID) return;
 
-  try {
-    const chosenText = PHILOSOPHICAL_BANAT[Math.floor(Math.random() * PHILOSOPHICAL_BANAT.length)];
-
-    let payload = chosenText;
-    if (data.targetID && data.targetName) {
-      payload = {
-        body: `🔥 @${data.targetName} ${chosenText}`,
-        mentions: [{ id: data.targetID, tag: `@${data.targetName}` }]
-      };
-    }
-
-    const delay = getTypingDelay(typeof payload === "string" ? payload : payload.body);
-    await sleep(delay);
-
-    api.sendMessage(payload, threadID, (err, info) => {
-      if (err) return console.error("[BANAT Send Error]:", err);
-
-      if (info && info.messageID) {
-        api.setMessageReaction("😆", info.messageID, (reactErr) => {
-          if (reactErr) console.error("[HAHA-REACT Error]:", reactErr);
-        }, true);
-      }
-    }, messageID);
-
-  } catch (err) {
-    console.error("[BANAT-ENGINE Event Error]:", err);
+  // Anti-Spam Buffer: Burahin ang nakalipas na timer para hindi sumabay sa nag-i-spam
+  if (userSpamTimers.has(senderID)) {
+    clearTimeout(userSpamTimers.get(senderID));
   }
+
+  // Maghintay muna matapos mag-type/spam ang tao bago lumapag ang bot
+  const timer = setTimeout(async () => {
+    userSpamTimers.delete(senderID);
+
+    try {
+      let chosenText;
+
+      // Kapag nagbibilang o nagse-send ng resibo/numero -> Puputulin ang bilang
+      if (isCountingOrNumberSpam(cleanBody)) {
+        chosenText = NUMBER_INTERCEPT_RESPONSES[Math.floor(Math.random() * NUMBER_INTERCEPT_RESPONSES.length)];
+      } else {
+        chosenText = PHILOSOPHICAL_BANAT[Math.floor(Math.random() * PHILOSOPHICAL_BANAT.length)];
+      }
+
+      let payload = chosenText;
+      if (data.targetID && data.targetName) {
+        payload = {
+          body: `🔥 @${data.targetName} ${chosenText}`,
+          mentions: [{ id: data.targetID, tag: `@${data.targetName}` }]
+        };
+      }
+
+      api.sendMessage(payload, threadID, (err, info) => {
+        if (err) return console.error("[BANAT Send Error]:", err);
+
+        if (info && info.messageID) {
+          api.setMessageReaction("😆", info.messageID, (reactErr) => {
+            if (reactErr) console.error("[HAHA-REACT Error]:", reactErr);
+          }, true);
+        }
+      }, messageID);
+
+    } catch (err) {
+      console.error("[BANAT-ENGINE Event Error]:", err);
+    }
+  }, getHumanDelay());
+
+  userSpamTimers.set(senderID, timer);
 };
 
 // ===== COMMAND RUN =====
@@ -218,7 +240,6 @@ module.exports.run = async function ({ api, event, args }) {
     data.active = false;
     data.targetID = null;
     data.targetName = null;
-    data.expireAt = null;
     saveData(data);
     return api.sendMessage("🕧 [ GAME OVER ] BANAT ENGINE IS NOW OFF!", threadID, messageID);
   }
@@ -226,7 +247,6 @@ module.exports.run = async function ({ api, event, args }) {
   if (sub === "on") {
     const mentionedKeys = Object.keys(mentions || {});
     data.active = true;
-    data.expireAt = Date.now() + (24 * 60 * 60 * 1000);
 
     if (mentionedKeys.length > 0) {
       const targetID = mentionedKeys[0];
@@ -239,8 +259,9 @@ module.exports.run = async function ({ api, event, args }) {
         `👑 [ INTELLECTUAL ROAST ACTIVATED ]\n\n` +
         `🎯 Target: ${mentions[targetID]}\n` +
         `😆 Auto-React: On bot's own message\n` +
-        `⏳ Duration: 24 hours\n` +
-        `📩 Mode: 1 Text = 1 Reply (Human speed)\n` +
+        `⏳ Duration: NO TIME LIMIT (Infinite)\n` +
+        `⚡ Anti-Spam: Idle-trigger Delay (2-3s)\n` +
+        `🔢 Counter Interceptor: Active\n` +
         `👑 Admin: sinzu`,
         threadID,
         messageID
@@ -254,8 +275,9 @@ module.exports.run = async function ({ api, event, args }) {
         `👑 [ GLOBAL INTELLECTUAL ROAST ACTIVATED ]\n\n` +
         `🌐 Mode: Global\n` +
         `😆 Auto-React: On bot's own message\n` +
-        `⏳ Duration: 24 hours\n` +
-        `📩 Mode: 1 Text = 1 Reply (Human speed)\n` +
+        `⏳ Duration: NO TIME LIMIT (Infinite)\n` +
+        `⚡ Anti-Spam: Idle-trigger Delay (2-3s)\n` +
+        `🔢 Counter Interceptor: Active\n` +
         `👑 Admin: sinzu`,
         threadID,
         messageID
@@ -272,3 +294,4 @@ module.exports.run = async function ({ api, event, args }) {
     messageID
   );
 };
+
