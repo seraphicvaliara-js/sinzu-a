@@ -1,12 +1,14 @@
 const yts = require("yt-search");
 const ytdl = require("@distube/ytdl-core");
+const fs = require("fs-extra");
+const path = require("path");
 
 module.exports.config = {
   name: "song",
-  version: "1.0.0",
+  version: "1.0.2",
   hasPermission: 0,
   credits: "sinzu",
-  description: "Mag-download at mag-play ng audio mula sa YouTube sa Messenger.",
+  description: "Mag-download at mag-play ng audio mula sa YouTube",
   usePrefix: true,
   commandCategory: "Media",
   usages: "/song [title / artist]",
@@ -15,39 +17,67 @@ module.exports.config = {
 
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID } = event;
-  const keyword = args.join(" ").trim();
+  const query = args.join(" ").trim();
 
-  if (!keyword) {
-    return api.sendMessage("⚠️ Pakilagay ang pamagat ng kanta. Halimbawa: /song Pasilyo", threadID, messageID);
+  if (!query) {
+    return api.sendMessage("⚠️ Pakilagay ang pamagat ng kanta.\nHalimbawa: /song Pasilyo", threadID, messageID);
   }
 
-  try {
-    api.sendMessage(`🔍 Hinahanap ang kantang "${keyword}"...`, threadID, messageID);
+  const cacheDir = path.join(__dirname, "cache");
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
 
-    // Mag-search sa YouTube
-    const searchResults = await yts(keyword);
-    const video = searchResults.videos[0];
+  const filePath = path.join(cacheDir, `${Date.now()}_song.mp3`);
+
+  try {
+    api.sendMessage(`🔍 Hinahanap ang kantang "${query}"...`, threadID, messageID);
+
+    // Search sa YouTube
+    const searchResult = await yts(query);
+    const video = searchResult.videos[0];
 
     if (!video) {
-      return api.sendMessage("❌ Walang nahanap na kanta para sa iyong search.", threadID, messageID);
+      return api.sendMessage("❌ Walang nahanap na kanta.", threadID, messageID);
     }
 
-    // Kunan ng audio stream mula sa YouTube URL
-    const audioStream = ytdl(video.url, {
+    // Download options para maiwasan ang blocking at stuck-ups
+    const stream = ytdl(video.url, {
       filter: "audioonly",
-      quality: "highestaudio"
+      quality: "highestaudio",
+      requestOptions: {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      }
     });
 
-    // I-send pabalik sa Messenger bilang Audio attachment
-    const msgPayload = {
-      body: `🎵 ${video.title}\n⏱️ Duration: ${video.timestamp}\n👀 Views: ${video.views.toLocaleString()}`,
-      attachment: audioStream
-    };
+    const fileStream = fs.createWriteStream(filePath);
+    stream.pipe(fileStream);
 
-    return api.sendMessage(msgPayload, threadID, messageID);
+    fileStream.on("finish", async () => {
+      const msgPayload = {
+        body: `🎵 ${video.title}\n⏱️ Duration: ${video.timestamp}\n👀 Views: ${video.views.toLocaleString()}`,
+        attachment: fs.createReadStream(filePath)
+      };
+
+      api.sendMessage(msgPayload, threadID, () => {
+        // Auto-delete temporary file pagkasend
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }, messageID);
+    });
+
+    fileStream.on("error", (err) => {
+      console.error("[FILE STREAM ERROR]:", err);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      return api.sendMessage("❌ Nagka-error habang dina-download ang audio file.", threadID, messageID);
+    });
 
   } catch (err) {
     console.error("[SONG CMD ERROR]:", err);
-    return api.sendMessage("❌ Nagka-error habang dina-download ang audio. Pakisubukan ulit.", threadID, messageID);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    return api.sendMessage("❌ Nagka-error sa pag-access sa YouTube. Pakisubukan ulit.", threadID, messageID);
   }
 };
