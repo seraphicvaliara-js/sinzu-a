@@ -25,6 +25,8 @@ function safeReadJSON(filePath, fallback) {
 
 function safeWriteJSON(filePath, data) {
   try {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     return true;
   } catch (err) {
@@ -43,10 +45,10 @@ function safeSend(api, message, threadID, messageID) {
 
   const now = Date.now();
   const last = sendQueue.get(threadID) || 0;
-  const minDelay = 800; // minimum 800ms between messages sa same thread
+  const minDelay = 900; // minimum delay between messages sa same thread
 
   if (now - last < minDelay) {
-    setTimeout(() => safeSend(api, message, threadID, messageID), minDelay - (now - last) + 50);
+    setTimeout(() => safeSend(api, message, threadID, messageID), minDelay - (now - last) + 80);
     return;
   }
 
@@ -92,7 +94,13 @@ if (!fs.existsSync('./data/database.json')) fs.writeFileSync('./data/database.js
 // ---------------------------------------------------------------------------
 function registerModule(scriptPath, file) {
   try {
-    const { config: cfg, run, handleEvent } = require(scriptPath);
+    // Clear cache para fresh always
+    delete require.cache[require.resolve(scriptPath)];
+    const mod = require(scriptPath);
+    const cfg = mod.config;
+    const run = mod.run;
+    const handleEvent = mod.handleEvent;
+
     if (!cfg) return;
 
     const {
@@ -109,18 +117,36 @@ function registerModule(scriptPath, file) {
     } = Object.fromEntries(Object.entries(cfg).map(([key, value]) => [key.toLowerCase(), value]));
 
     const finalAliases = Array.isArray(aliases) ? [...aliases] : [aliases];
-    finalAliases.push(name);
+    if (Array.isArray(name)) finalAliases.push(...name);
+    else finalAliases.push(name);
 
     if (run) {
       Utils.commands.set(finalAliases, {
-        name, role, run, aliases: finalAliases, description, usage, version,
-        hasPrefix: cfg.hasPrefix, credits, cooldown, dev: devOnly,
+        name,
+        role,
+        run,
+        aliases: finalAliases,
+        description,
+        usage,
+        version,
+        hasPrefix: cfg.hasPrefix,
+        credits,
+        cooldown,
+        dev: devOnly,
       });
     }
     if (handleEvent) {
       Utils.handleEvent.set(finalAliases, {
-        name, handleEvent, role, description, usage, version,
-        hasPrefix: cfg.hasPrefix, credits, cooldown, dev: devOnly,
+        name,
+        handleEvent,
+        role,
+        description,
+        usage,
+        version,
+        hasPrefix: cfg.hasPrefix,
+        credits,
+        cooldown,
+        dev: devOnly,
       });
     }
   } catch (error) {
@@ -140,14 +166,19 @@ try {
     }
     if (stats.isDirectory()) {
       try {
-        fs.readdirSync(scripts).forEach((inner) => registerModule(path.join(scripts, inner), inner));
+        fs.readdirSync(scripts).forEach((inner) => {
+          if (inner.endsWith('.js')) {
+            registerModule(path.join(scripts, inner), inner);
+          }
+        });
       } catch (err) {
         console.error(chalk.red(`Hindi ma-basa ang folder ${scripts}: ${err.message}`));
       }
-    } else {
+    } else if (file.endsWith('.js')) {
       registerModule(scripts, file);
     }
   });
+  console.log(chalk.green(`[loader] Loaded ${Utils.commands.size} commands, ${Utils.handleEvent.size} events`));
 } catch (err) {
   console.error(chalk.red(`Hindi ma-load ang script folder: ${err.message}`));
 }
@@ -196,8 +227,8 @@ app.get('/commands', (req, res) => {
     const handleEvent = [...Utils.handleEvent.values()]
       .map(({ name }) => (command.has(name) ? null : (command.add(name), name)))
       .filter(Boolean);
-    const role = [...Utils.commands.values()].map(({ role }) => (command.add(role), role));
-    const aliases = [...Utils.commands.values()].map(({ aliases }) => (command.add(aliases), aliases));
+    const role = [...Utils.commands.values()].map(({ role }) => role);
+    const aliases = [...Utils.commands.values()].map(({ aliases }) => aliases);
     res.json({ commands, handleEvent, role, aliases });
   } catch (err) {
     res.status(500).json({ error: true, message: err.message });
@@ -236,7 +267,7 @@ app.post('/login', async (req, res) => {
   }
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(chalk.green(`Server is running at http://localhost:${PORT}`));
 });
@@ -333,7 +364,7 @@ async function accountLogin(state, enableCommands = [], prefix, admin = []) {
 // ---------------------------------------------------------------------------
 function startListening(api, userid, prefix, admin, enableCommands) {
   let mqttRetryCount = 0;
-  const MAX_MQTT_RETRIES = 10;
+  const MAX_MQTT_RETRIES = 12;
 
   const listen = () => {
     try {
@@ -350,7 +381,7 @@ function startListening(api, userid, prefix, admin, enableCommands) {
               return;
             }
 
-            const delay = 6000 + mqttRetryCount * 2500;
+            const delay = Math.min(5000 + mqttRetryCount * 2000, 45000);
             console.log(chalk.yellow(`Reconnecting MQTT for ${userid} in ${Math.round(delay / 1000)}s (attempt ${mqttRetryCount})...`));
             setTimeout(listen, delay);
             return;
@@ -412,13 +443,16 @@ function startListening(api, userid, prefix, admin, enableCommands) {
             }
           }
 
+          // Cooldown
           if (body && aliases(command)?.name) {
             const now = Date.now();
             const name = aliases(command)?.name;
-            const sender = Utils.cooldowns.get(`\( {senderID}_ \){name}_${userid}`);
-            const delay = aliases(command)?.cooldown ?? 0;
+            const key = `\( {senderID}_ \){name}_${userid}`;
+            const sender = Utils.cooldowns.get(key);
+            const delay = Number(aliases(command)?.cooldown) || 0;
+
             if (!sender || (now - sender.timestamp) >= delay * 1000) {
-              Utils.cooldowns.set(`\( {senderID}_ \){name}_${userid}`, { timestamp: now, command: name });
+              Utils.cooldowns.set(key, { timestamp: now, command: name });
             } else {
               const active = Math.ceil((sender.timestamp + delay * 1000 - now) / 1000);
               safeSend(api, `Please wait \( {active} seconds before using the " \){name}" command again.`, threadID, event.messageID);
@@ -440,7 +474,7 @@ function startListening(api, userid, prefix, admin, enableCommands) {
           for (const { handleEvent, name } of Utils.handleEvent.values()) {
             if (handleEvent && name && ((enableCommands[1].handleEvent || []).includes(name) || (enableCommands[0].commands || []).includes(name))) {
               try {
-                handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
+                await handleEvent({ api, event, enableCommands, admin, prefix, blacklist });
               } catch (err) {
                 console.error(chalk.red(`Error sa handleEvent '${name}': ${err.message}`));
               }
@@ -457,7 +491,14 @@ function startListening(api, userid, prefix, admin, enableCommands) {
               if (matched && enableCommands[0].commands.includes(matched.name)) {
                 try {
                   await (matched.run || (() => {}))({
-                    api, event, args, enableCommands, admin, prefix, blacklist, Utils,
+                    api,
+                    event,
+                    args,
+                    enableCommands,
+                    admin,
+                    prefix,
+                    blacklist,
+                    Utils,
                   });
                 } catch (err) {
                   console.error(chalk.red(`Error sa command '${matched.name}': ${err.message}`));
@@ -474,6 +515,8 @@ function startListening(api, userid, prefix, admin, enableCommands) {
       });
     } catch (err) {
       console.error(chalk.red(`Failed to start listenMqtt for ${userid}: ${err.message}`));
+      // Retry after delay
+      setTimeout(listen, 8000);
     }
   };
 
@@ -522,7 +565,9 @@ async function addThisUser(userid, enableCommands, state, prefix, admin, blackli
 
 function aliases(command) {
   if (!command) return null;
-  const found = Array.from(Utils.commands.entries()).find(([commands]) => commands.includes(command.toLowerCase()));
+  const found = Array.from(Utils.commands.entries()).find(([commands]) =>
+    commands.some((c) => String(c).toLowerCase() === String(command).toLowerCase())
+  );
   return found ? found[1] : null;
 }
 
@@ -556,7 +601,7 @@ async function main() {
           const update = Utils.account.get(user.userid);
           if (update) user.time = update.time;
         });
-        await empty.emptyDir(cacheFile);
+        await empty.emptyDir(cacheFile).catch(() => {});
         safeWriteJSON('./data/history.json', currentHistory);
       } catch (err) {
         console.error(chalk.red(`Error sa scheduled restart cleanup: ${err.message}`));
@@ -565,7 +610,8 @@ async function main() {
       }
     });
 
-    for (const file of fs.readdirSync(sessionFolder)) {
+    const sessionFiles = fs.readdirSync(sessionFolder).filter((f) => f.endsWith('.json'));
+    for (const file of sessionFiles) {
       const filePath = path.join(sessionFolder, file);
       try {
         const record = history.find((item) => item.userid === path.parse(file).name) || {};
@@ -573,6 +619,7 @@ async function main() {
         const state = safeReadJSON(filePath, null);
         if (enableCommands && state) {
           await accountLogin(state, enableCommands, prefix, admin, blacklist);
+          console.log(chalk.green(`[login] Successfully logged in: ${path.parse(file).name}`));
         }
       } catch (error) {
         console.error(chalk.red(`Hindi ma-relogin ang session ${file}: ${error.message}`));
@@ -598,7 +645,7 @@ function createConfig() {
       logLevel: 'silent',
       updatePresence: true,
       selfListen: true,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       online: true,
       autoMarkDelivery: false,
       autoMarkRead: false,
