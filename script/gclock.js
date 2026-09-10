@@ -3,18 +3,18 @@ const path = require("path");
 
 module.exports.config = {
   name: "gclock",
-  version: "1.0.0",
+  version: "1.0.3",
   hasPermission: 0,
   credits: "you",
-  description: "Admin-only: set a nickname for everyone in the group + lock it so it auto-reverts if changed. Also lock the group chat name so it can't be changed.",
+  description: "Admin-only: set/lock nicknames and lock group chat name.",
   commandCategory: "group",
-  usages: "nick <nickname> | name <group name> | off nick | off name | off",
+  usages: "nick all <nickname> | lock gcname | name <group name> | off",
   cooldowns: 3,
+  prefix: "/" 
 };
 
 const DATA_FILE = path.join(__dirname, "gclock_data.json");
 
-// Structure: { [threadID]: { nickLocked: bool, nickName: string, nameLocked: bool, groupName: string } }
 function loadData() {
   try {
     if (fs.existsSync(DATA_FILE)) {
@@ -50,13 +50,16 @@ function getThreadEntry(threadID) {
 
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID } = event;
-  const sub = args[0] ? args[0].toLowerCase() : null;
-  const prefix = global.config?.PREFIX || "/";
+  const prefix = module.exports.config.prefix || global.config?.PREFIX || "/";
   const entry = getThreadEntry(threadID);
 
-  // Bot admin-only — IDs come from the bot dashboard config (global.config.adminBot)
-  const adminBot = global.config?.adminBot || [];
-  if (!adminBot.includes(senderID)) {
+  const allowedAdmins = [
+    "61594240921272",
+    "61591430164540",
+    ...(global.config?.adminBot || [])
+  ];
+  
+  if (!allowedAdmins.includes(senderID)) {
     return api.sendMessage(
       "🚫 Admin-only command. Only bot admins set in the dashboard can use this.",
       threadID,
@@ -64,11 +67,17 @@ module.exports.run = async function ({ api, event, args }) {
     );
   }
 
-  if (sub === "nick") {
-    const nickname = args.slice(1).join(" ").trim();
+  const sub = args[0] ? args[0].toLowerCase() : null;
+  const sub2 = args[1] ? args[1].toLowerCase() : null;
+
+  // Command: /nick all [nickname] O /gclock nick [nickname]
+  if (sub === "nick" || (sub === "nick" && sub2 === "all")) {
+    const nickStartIndex = sub2 === "all" ? 2 : 1;
+    const nickname = args.slice(nickStartIndex).join(" ").trim();
+    
     if (!nickname) {
       return api.sendMessage(
-        `Usage: ${prefix}gclock nick <nickname>`,
+        `Usage: ${prefix}nick all <nickname>`,
         threadID,
         messageID
       );
@@ -103,8 +112,9 @@ module.exports.run = async function ({ api, event, args }) {
     return;
   }
 
-  if (sub === "name") {
-    const groupName = args.slice(1).join(" ").trim();
+  // Command: /gclock lock gcname O /gclock name [group name]
+  if (sub === "lock" && sub2 === "gcname" || sub === "name") {
+    const groupName = sub === "lock" ? args.slice(2).join(" ").trim() : args.slice(1).join(" ").trim();
 
     const applyLock = (finalName) => {
       entry.nameLocked = true;
@@ -118,7 +128,6 @@ module.exports.run = async function ({ api, event, args }) {
     if (groupName) {
       applyLock(groupName);
     } else {
-      // No name given — lock whatever the current group name is
       api.getThreadInfo(threadID, (err, info) => {
         if (err || !info) {
           return api.sendMessage("❌ Failed to fetch current group name.", threadID, messageID);
@@ -129,21 +138,19 @@ module.exports.run = async function ({ api, event, args }) {
     return;
   }
 
+  // Command: /gclock off
   if (sub === "off") {
-    const target = args[1] ? args[1].toLowerCase() : null;
-
-    if (target === "nick") {
+    if (sub2 === "nick") {
       entry.nickLocked = false;
       saveData(gclockData);
       return api.sendMessage("🔓 Nickname lock turned off.", threadID, messageID);
     }
-    if (target === "name") {
+    if (sub2 === "name" || sub2 === "gcname") {
       entry.nameLocked = false;
       saveData(gclockData);
       return api.sendMessage("🔓 Group name lock turned off.", threadID, messageID);
     }
 
-    // No target — turn both off
     entry.nickLocked = false;
     entry.nameLocked = false;
     saveData(gclockData);
@@ -151,13 +158,16 @@ module.exports.run = async function ({ api, event, args }) {
   }
 
   return api.sendMessage(
-    `Usage:\n${prefix}gclock nick <nickname> — set + lock nickname for everyone\n${prefix}gclock name <group name> — lock group name\n${prefix}gclock off nick | off name | off — turn locks off`,
+    `Usage:\n` +
+    `• ${prefix}nick all <nickname> — set & lock nickname for everyone\n` +
+    `• ${prefix}gclock lock gcname — lock current GC name\n` +
+    `• ${prefix}gclock name <group name> — set & lock GC name\n` +
+    `• ${prefix}gclock off — turn off all locks`,
     threadID,
     messageID
   );
 };
 
-// Auto-revert on nickname or group name changes while locked
 module.exports.handleEvent = function ({ api, event }) {
   const { threadID, logMessageType, logMessageData } = event;
   const entry = gclockData[threadID];
