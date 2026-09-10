@@ -4,13 +4,12 @@ const path = require("path");
 const SCRIPT_FILE = "auto.js";
 const SCRIPT_PATH = path.join(__dirname, SCRIPT_FILE);
 
-// ========== CONFIG ==========
+// ========== WATCHDOG CONFIG ==========
 const MAX_RESTARTS_BEFORE_COOLDOWN = 8;
 const CRASH_WINDOW_MS = 120 * 1000;        // 2 minutes window
 const BASE_DELAY_MS = 2000;                // starting delay
 const MAX_DELAY_MS = 90 * 1000;            // max 1.5 min backoff
 const COOLDOWN_MS = 60 * 1000;             // 1 min cooldown after too many crashes
-const HEALTH_CHECK_INTERVAL = 30 * 1000;   // check every 30s
 
 let restartCount = 0;
 let lastCrashTime = Date.now();
@@ -56,14 +55,12 @@ function start() {
       consecutiveCleanExits++;
       log(`Main process exited cleanly (code 0). Clean exits: ${consecutiveCleanExits}`);
       
-      // Kung sobrang madalas mag-clean exit, baka may issue
       if (consecutiveCleanExits >= 5) {
         log("Too many clean exits in a row. Waiting longer before restart...", "warn");
         setTimeout(start, 15000);
         consecutiveCleanExits = 0;
         return;
       }
-      // Normal clean exit → restart after short delay
       setTimeout(start, 3000);
       return;
     }
@@ -81,7 +78,6 @@ function start() {
 function scheduleRestart(reason = "unknown") {
   const now = Date.now();
 
-  // Reset counter kung matagal na ang last crash
   if (now - lastCrashTime > CRASH_WINDOW_MS) {
     restartCount = 0;
     currentDelay = BASE_DELAY_MS;
@@ -90,12 +86,11 @@ function scheduleRestart(reason = "unknown") {
   lastCrashTime = now;
   restartCount++;
 
-  // Exponential backoff
   currentDelay = Math.min(Math.floor(currentDelay * 1.7), MAX_DELAY_MS);
 
   if (restartCount > MAX_RESTARTS_BEFORE_COOLDOWN) {
     log(
-      `\( {restartCount} crashes detected in short time ( \){reason}). ` +
+      `${restartCount} crashes detected in short time (${reason}). ` +
       `Entering cooldown for ${COOLDOWN_MS / 1000}s to protect resources.`,
       "error"
     );
@@ -108,16 +103,19 @@ function scheduleRestart(reason = "unknown") {
     return;
   }
 
-  log(`Restarting in \( {(currentDelay / 1000).toFixed(1)}s (attempt # \){restartCount})...`);
+  log(`Restarting in ${(currentDelay / 1000).toFixed(1)}s (attempt #${restartCount})...`);
   setTimeout(start, currentDelay);
 }
 
-// Catch errors sa watchdog mismo
+// ========== GLOBAL CATCHERS & SILENCE INJECTOR ==========
+// Bino-block ang anumang "Invalid command" error logging/output sa console
 process.on("uncaughtException", (err) => {
+  if (err.message && err.message.includes("Invalid command")) return;
   log(`Watchdog uncaughtException: ${err.message}`, "error");
 });
 
 process.on("unhandledRejection", (reason) => {
+  if (reason && reason.toString().includes("Invalid command")) return;
   log(`Watchdog unhandledRejection: ${reason}`, "error");
 });
 
@@ -138,6 +136,6 @@ process.on("SIGTERM", () => {
   process.exit(0);
 });
 
-// Start
-log("Watchdog started. Protecting auto.js...", "success");
+// Start Bot Engine Watchdog
+log("Watchdog started. Protecting auto.js with absolute command silence...", "success");
 start();
