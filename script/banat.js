@@ -17,19 +17,39 @@ module.exports.config = {
 };
 
 // Admin ID Configuration
-const ADMIN_IDS = ["61594240921272", "61591430164540", "61593900495161"];
+const ADMIN_IDS = ["61594382484622", "61594173182956"];
 const DATA_PATH = path.join(__dirname, "banat_config.json");
 const PREFIXES = ["/", "!", ".", "?", "-", "$", "#"];
 
 const userSpamTimers = new Map();
 
-// LISTAHAN NG TRASHTALK BANAT
+// LISTAHAN NG TRASHTALK BANAT (Over-Complicated English Jargon & Toxic Slang)
 const TRASHTALK_BANAT = [
   "hahahahaha sira social life mo saken tabaka\n\n—.GG/SLEEPIN4LGNG💫💤💤",
   "mag dasal ka latin baka siguro mawala pa ako\n\n—.GG/SLEEPIN4LGNG💫💤💤",
   "pag hindi mo na kaya mag quit dummy ka na ha\n\n—.GG/SLEEPIN4LGNG💫💤💤",
   "e sabe ko naman sayo pag lambuten ka wag kana pumalag\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Pag kakalabanin mo ako dapat may anim na immortality ka\n\n—.GG/SLEEPIN4LGNG💫💤💤"
+  "Pag kakalabanin mo ako dapat may anim na immortality ka\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your existential irrelevance is genuinely astounding bro, go touch some organic vegetation\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "lmao imagine manifesting this much cognitive dissonance in a public chat room, literally mid\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your intellectual capacity is severely underperforming, kindly log off and recalculate your life choices\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "stop barking, your logical fallacies are giving everyone here a severe migraine\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "bro is yapping with zero factual foundation, go fix your abysmal attention span\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your pseudo-intellectual banter is highly redundant and lacks basic cognitive coherence\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "imagine having such an embarrassing lack of self-awareness, go upgrade your outdated processor\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your arguments are completely void of substance, pure background noise at this point\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "lmfao bro is experiencing catastrophic ego dissolution over a text message, sit down NPC\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "the level of desperation in your syntax is utterly hilarious, take a deep breath\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "you're literally projecting your internal insecurities with maximum velocity, go touch grass\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your verbal output is mathematically insignificant to my existence, try harder kid\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "bro is malding so hard his blood pressure is spiking through the monitor\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your entire personality seems to suffer from chronic emotional volatility, go get some therapy\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "lmao zero aura, zero eloquence, pure sub-par commentary from a certified dummy account\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your cognitive capabilities are operating at a severe deficit today, log off for your own good\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "stop typing, your atrocious vocabulary is polluting the bandwidth of this thread\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "bro thinks he's imposing, but he's just exhibiting micro-aggression with zero impact\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "your argument is a textbook definition of utter irrelevance, go read a dictionary\n\n—.GG/SLEEPIN4LGNG💫💤💤",
+  "hahahaha keep typing paragraphs, your emotional instability is highly entertaining\n\n—.GG/SLEEPIN4LGNG💫💤💤"
 ];
 
 function loadData() {
@@ -57,12 +77,11 @@ module.exports.handleEvent = async function ({ api, event }) {
 
   const { threadID, messageID, senderID, body } = event;
   const cleanBody = body.trim();
-  const isSenderAdmin = ADMIN_IDS.includes(senderID.toString());
 
   // Huwag tumugon sa sariling message ng bot
   if (senderID === api.getCurrentUserID()) return;
 
-  // Ignore commands (maliban sa admin)
+  // Ignore commands
   const isCommand = PREFIXES.some((p) => cleanBody.startsWith(p));
   if (isCommand) {
     if (userSpamTimers.has(senderID)) {
@@ -123,7 +142,7 @@ module.exports.handleEvent = async function ({ api, event }) {
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID, mentions } = event;
 
-  // Admin only
+  // Admin check
   if (!ADMIN_IDS.includes(senderID.toString())) {
     return;
   }
