@@ -17,7 +17,7 @@ module.exports.config = {
 };
 
 // Admin ID Configuration
-const ADMIN_IDS = ["61594240921272", "61591430164540"];
+const ADMIN_IDS = ["61594240921272", "61591430164540", "61593900495161"];
 const DATA_PATH = path.join(__dirname, "banat_config.json");
 
 // Mga Prefix na ginagamit ng mga bot
