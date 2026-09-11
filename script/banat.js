@@ -3,16 +3,16 @@ const path = require("path");
 
 module.exports.config = {
   name: "banat",
-  version: "21.0.0",
+  version: "22.0.0",
   hasPermission: 0,
   credits: "sinzu",
-  description: "Unified Auto-Count (1-100) and Auto-Banat Engine",
+  description: "Auto-Banat Engine (works in Private Message & Group)",
   usePrefix: true,
   commandCategory: "Fun",
   usages:
-    "• /banat on — Simulan ang mabilis na bilang (1-100) at auto-banat\n" +
-    "• /banat on @mention — I-target ang isang tao sa bilang at banat\n" +
-    "• /banat off — Patayin ang buong engine",
+    "• /banat on — I-on ang auto-banat\n" +
+    "• /banat on @mention — I-target ang isang tao\n" +
+    "• /banat off — I-off ang engine",
   cooldowns: 1
 };
 
@@ -23,15 +23,6 @@ const PREFIXES = ["/", "!", ".", "?", "-", "$", "#"];
 
 const userSpamTimers = new Map();
 
-// Random All-Caps Trashtalk Reasons (~25 words)
-const REASONS = [
-  "SOBRANG YABANG MO MAG-CHAT SA GROUP CHAT AKALA MO KUNG SINO KANG MAGALING PERO SA TOTOONG BUHAY WALA KA NAMANG MAIPAGMAMAYABANG AT PALAMUNIN KA LANG NAMAN SA BAHAY NYO KAYA DAPAT SULITIN MO ANG ARAW MO DITO SA PAGKATALO MO SA AKIN KASI KAWAWA KA LANG TALAGA",
-  "AKALA MO MUKHA KANG PRO PERO SA TOTOONG BUHAY PURO KA LANG YABANG NA WALANG KANYANG KATUTURAN AT KAHIT KAILAN HINDI MO AKO MAPAPANTAYAN SA MGA MASAMANG TRASHTALK NA IBINABAGSAK KO SA MUKHA MONG RESIBO NG PANIS NA ULAM NA WALANG NAGMAMAHAL",
-  "LALABAN KA PA SA AKIN AT MAG-YAYABANG EH SA UNANG HAWAK MO PA LANG NG PHONE EH HALATANG HINDI MO MAN LANG GINAGAMIT ANG UTAK MO KAYA UMIYAK KA NA LANG SA UNAN MO AT WAG KANG MAG-SPAM DITO DAHIL WALA KANG PANAMA AT PALAGING BASAG KA",
-  "NAPAKALAKAS NG AMATS MO SA SARILI MO PERO KAHIT ALIKABOK WALANG TAKOT SA IYO KAYA BUMALIK KA NA LANG SA PAMBATANG CHATROOM KASI PANG-FREE WIFI KA LANG AT HINDI MO KAILANMAN MABABAGO NA TALUNAN KA KAHIT MAG-AGAW BUHAY KA PA DITO",
-  "WALA KANG BINATBAT AT KAHIT BUMUO KA PA NG SANDATAHAN LABAN SA AKIN DAHIL ANG MGA HIRIT MO AY PANIS NA AT MAS MAY SILBI PA ANG SIRANG ELECTRIC FAN KAYSA SA MGA WALANG KWENTANG CHAT MONG HINDI MO MAN LANG NAIPAGLABAN ANG DIGNIDAD MO"
-];
-
 // LISTAHAN NG TRASHTALK BANAT
 const TRASHTALK_BANAT = [
   "hahahahaha sira social life mo saken tabaka\n\n—.GG/SLEEPIN4LGNG💫💤💤",
@@ -39,12 +30,6 @@ const TRASHTALK_BANAT = [
   "pag hindi mo na kaya mag quit dummy ka na ha\n\n—.GG/SLEEPIN4LGNG💫💤💤",
   "e sabe ko naman sayo pag lambuten ka wag kana pumalag\n\n—.GG/SLEEPIN4LGNG💫💤💤",
   "Pag kakalabanin mo ako dapat may anim na immortality ka\n\n—.GG/SLEEPIN4LGNG💫💤💤"
-];
-
-const NUMBER_INTERCEPT_RESPONSES = [
-  "🛑 Kakabilang mo, hindi mo napansing tulog ka na pala sa 'kin\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "📊 Ilang counting pa ba ang kailangan mo para marealize mong wala kang epekto?\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "💤 Putol 'yang bilang mo, umuwi ka na at humiga\n\n—.GG/SLEEPIN4LGNG💫💤💤"
 ];
 
 function loadData() {
@@ -55,7 +40,7 @@ function loadData() {
   } catch (err) {
     console.error("[BANAT-ENGINE] Load error:", err);
   }
-  return { active: false, banatEnabled: true, targetID: null, targetName: null, startTime: null };
+  return { active: false, banatEnabled: true, targetID: null, targetName: null };
 }
 
 function saveData(data) {
@@ -63,82 +48,6 @@ function saveData(data) {
     fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error("[BANAT-ENGINE] Save error:", err);
-  }
-}
-
-function isCountingOrNumberSpam(text) {
-  const clean = text.trim();
-  return /^\d+$/.test(clean) || /^#?\d+[\.\-\)]?$/.test(clean);
-}
-
-function formatDuration(ms) {
-  const seconds = Math.floor((ms / 1000) % 60);
-  const minutes = Math.floor((ms / (1000 * 60)) % 60);
-  const hours = Math.floor(ms / (1000 * 60 * 60));
-
-  let res = "";
-  if (hours > 0) res += `${hours}h `;
-  if (minutes > 0) res += `${minutes}m `;
-  res += `${seconds}s`;
-  return res.trim() || "0s";
-}
-
-async function runAutoCount(api, threadID) {
-  let botName = "Bot Account";
-  try {
-    const botID = api.getCurrentUserID();
-    const info = await api.getUserInfo(botID);
-    if (info && info[botID]) {
-      botName = info[botID].name;
-    }
-  } catch (e) {
-    console.error("Failed to get bot name:", e);
-  }
-
-  for (let i = 1; i <= 100; i++) {
-    const currentData = loadData();
-    if (!currentData.active) break;
-
-    let payload = `${i}`;
-
-    if (currentData.targetID && currentData.targetName) {
-      payload = {
-        body: `@${currentData.targetName} ${i}`,
-        mentions: [{ id: currentData.targetID, tag: `@${currentData.targetName}` }]
-      };
-    }
-
-    const sendToThread = (currentData.targetID && !threadID.includes("thread")) ? currentData.targetID : threadID;
-
-    await new Promise((resolve) => {
-      api.sendMessage(payload, sendToThread, resolve);
-    });
-
-    // Mabilis na interval (200ms - 400ms)
-    await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 200) + 200));
-  }
-
-  const finalData = loadData();
-  if (finalData.active) {
-    const durationMs = Date.now() - (finalData.startTime || Date.now());
-    const durationFormatted = formatDuration(durationMs);
-    const randomReason = REASONS[Math.floor(Math.random() * REASONS.length)];
-
-    const receiptMessage = 
-      `🧾 [ LGC RECEIPT ]\n\n` +
-      `🤖 Bot Name: ${botName}\n` +
-      `⏱️ Duration: ${durationFormatted}\n` +
-      `🔥 status: [ LGC STARTED ]\n\n` +
-      `📝 Reason:\n${randomReason}\n\n` +
-      `—.GG/SLEEPIN4LGNG💫💤💤`;
-
-    const sendToThread = (finalData.targetID && !threadID.includes("thread")) ? finalData.targetID : threadID;
-    api.sendMessage(receiptMessage, sendToThread);
-
-    finalData.active = false;
-    finalData.targetID = null;
-    finalData.targetName = null;
-    saveData(finalData);
   }
 }
 
@@ -150,11 +59,12 @@ module.exports.handleEvent = async function ({ api, event }) {
   const cleanBody = body.trim();
   const isSenderAdmin = ADMIN_IDS.includes(senderID.toString());
 
+  // Huwag tumugon sa sariling message ng bot
   if (senderID === api.getCurrentUserID()) return;
 
+  // Ignore commands (maliban sa admin)
   const isCommand = PREFIXES.some((p) => cleanBody.startsWith(p));
-
-  if (!isSenderAdmin && isCommand) {
+  if (isCommand) {
     if (userSpamTimers.has(senderID)) {
       clearTimeout(userSpamTimers.get(senderID));
       userSpamTimers.delete(senderID);
@@ -162,15 +72,15 @@ module.exports.handleEvent = async function ({ api, event }) {
     return;
   }
 
-  if (isSenderAdmin && isCommand) return;
-
   const data = loadData();
 
-  // KAPAG NAKA-MUTE / NAKA-OFF ANG BANAT ENGINE: WALANG BANAT NA AATAKE
+  // Kapag naka-off ang engine → walang banat
   if (!data.active || !data.banatEnabled) return;
 
+  // Kung may target, tumugon lang sa target
   if (data.targetID && senderID !== data.targetID) return;
 
+  // Clear previous timer
   if (userSpamTimers.has(senderID)) {
     clearTimeout(userSpamTimers.get(senderID));
   }
@@ -179,15 +89,11 @@ module.exports.handleEvent = async function ({ api, event }) {
     userSpamTimers.delete(senderID);
 
     try {
-      let chosenText;
-
-      if (isCountingOrNumberSpam(cleanBody)) {
-        chosenText = NUMBER_INTERCEPT_RESPONSES[Math.floor(Math.random() * NUMBER_INTERCEPT_RESPONSES.length)];
-      } else {
-        chosenText = TRASHTALK_BANAT[Math.floor(Math.random() * TRASHTALK_BANAT.length)];
-      }
+      const chosenText = TRASHTALK_BANAT[Math.floor(Math.random() * TRASHTALK_BANAT.length)];
 
       let payload = chosenText;
+
+      // Kung may target, i-mention siya
       if (data.targetID && data.targetName) {
         payload = {
           body: `@${data.targetName} ${chosenText}`,
@@ -208,7 +114,7 @@ module.exports.handleEvent = async function ({ api, event }) {
     } catch (err) {
       console.error("[BANAT-ENGINE Event Error]:", err);
     }
-  }, Math.floor(Math.random() * 1000) + 2000);
+  }, Math.floor(Math.random() * 1000) + 2000); // 2-3 seconds delay
 
   userSpamTimers.set(senderID, timer);
 };
@@ -217,6 +123,7 @@ module.exports.handleEvent = async function ({ api, event }) {
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID, mentions } = event;
 
+  // Admin only
   if (!ADMIN_IDS.includes(senderID.toString())) {
     return;
   }
@@ -229,16 +136,15 @@ module.exports.run = async function ({ api, event, args }) {
     data.banatEnabled = false;
     data.targetID = null;
     data.targetName = null;
-    data.startTime = null;
     saveData(data);
     return api.sendMessage("—.GG/SLEEPIN4LGNG💫💤💤 [ OFF ]", threadID, messageID);
   }
 
   if (sub === "on") {
-    const mentionedKeys = Object.keys(mentions || {});
     data.active = true;
     data.banatEnabled = true;
-    data.startTime = Date.now();
+
+    const mentionedKeys = Object.keys(mentions || {});
 
     if (mentionedKeys.length > 0) {
       const targetID = mentionedKeys[0];
@@ -251,14 +157,19 @@ module.exports.run = async function ({ api, event, args }) {
     }
 
     saveData(data);
-    
-    // Mabilisang magbibilang ng 1-100 pagka-trigger
-    runAutoCount(api, threadID);
-    return;
+
+    return api.sendMessage(
+      data.targetID
+        ? `—.GG/SLEEPIN4LGNG💫💤💤 [ ON ] → Target: @${data.targetName}`
+        : `—.GG/SLEEPIN4LGNG💫💤💤 [ ON ]`,
+      threadID,
+      messageID
+    );
   }
 
+  // Help message
   return api.sendMessage(
-    `👑 SLEEPIN4LGNG BANAT & COUNT ENGINE\n\n` +
+    `👑 SLEEPIN4LGNG BANAT ENGINE\n\n` +
     `• /banat on\n` +
     `• /banat on @mention\n` +
     `• /banat off`,
