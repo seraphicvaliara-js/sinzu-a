@@ -3,77 +3,91 @@ const path = require("path");
 
 module.exports.config = {
   name: "banat",
-  version: "16.0.0",
+  version: "18.0.0",
   hasPermission: 0,
   credits: "sinzu",
-  description: "Auto-Banat Engine - 100+ Savage Trashtalk Array",
+  description: "Advanced Auto-Banat Engine - 30s Auto-Count with Receipt Tracker",
   usePrefix: true,
   commandCategory: "Fun",
   usages:
-    "• /banat on — I-ON ang global auto-banat\n" +
-    "• /banat on @mention — I-target ang isang tao\n" +
-    "• /banat off — Patayin ang Banat Engine",
+    "• /banat on — I-ON ang global auto-banat sa GC na ito\n" +
+    "• /banat on @mention — I-target ang isang tao sa GC na ito\n" +
+    "• /banat off — Patayin ang Banat Engine sa GC na ito",
   cooldowns: 2
 };
 
-// Admin ID Configuration (Kasama na ang 61594251452411)
+// Admin ID Configuration
 const ADMIN_IDS = ["61594240921272", "61591430164540", "61593900495161", "61594251452411"];
 const DATA_PATH = path.join(__dirname, "banat_config.json");
-
-// Mga Prefix na ginagamit ng mga bot
 const PREFIXES = ["/", "!", ".", "?", "-", "$", "#"];
 
+// In-memory Timers & Counters
 const userSpamTimers = new Map();
+const autoCountTimers = new Map();
 
-// LISTAHAN NG MGA PANG-ASAR (English Jargon, HF Words, & Toxic Slang)
+// ===== SMART FLEXIBLE REPLIES =====
+const CONTEXTUAL_RESPONSES = [
+  {
+    keywords: ["aso", "asoka", "tuta"],
+    replies: [
+      "hindi ako aso, tao ako. ikaw ung gubat ang pinagmulan, mukha kang unggoy na tumakas sa zoo",
+      "lakas mo magsalita ng aso, eh sa amoy pa lang ng hininga mo mukha ka nang garapata",
+      "tahol ka nang tahol dyan, sino sa atin ang totoong aso? takot ka naman lumaban nang patas"
+    ]
+  },
+  {
+    keywords: ["bobo", "tanga", "inept", "gago"],
+    replies: [
+      "nagsalita ang academic failure, ayusin mo muna grammar mo bago ka magsalita ng bobo",
+      "ako bobo? baka kapag sinukat IQ natin dalawa, mag-negative sa’yo sa sobrang bagal ng utak mo",
+      "lakas ng loob mong tumawag ng tanga eh maski sarili mong buhay hindi mo maayos-ayos"
+    ]
+  },
+  {
+    keywords: ["tangina", "tangina mo", "gco"],
+    replies: [
+      "idamay mo pa magulang mo sa pagkatalo mo dito, umiyak ka na lang sa sulok nyo",
+      "puro ka mura wala namang laman argumento mo, halatang kapos sa aruga",
+      "galit na galit gustong manakit? mura pa lang nilalapag mo ibig sabihin talo ka na"
+    ]
+  },
+  {
+    keywords: ["mama mo", "papa mo", "magulang"],
+    replies: [
+      "huwag mong idamay pamilya mo dito, nahihiya na nga sila sa ginagawa mong kakornihan",
+      "puro ka mama mo, ikaw nga hindi maipagmalaki ng magulang mo sa mga kapitbahay nyo"
+    ]
+  },
+  {
+    keywords: ["duwag", "takot", "pumalag"],
+    replies: [
+      "sino ang duwag? kanina ka pa pilit gumagawa ng dahilan kasi nararamdaman mo nang patapos ka na",
+      "pumalag ka muna nang maayos bago ka magsalita tungkol sa pagiging duwag"
+    ]
+  }
+];
+
 const TRASHTALK_BANAT = [
-  // ORIGINAL MANDATORY BANATS:
-  "hahahahaha sira social life mo saken tabaka\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "mag dasal ka latin baka siguro mawala pa ako\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "pag hindi mo na kaya mag quit dummy ka na ha\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "e sabe ko naman sayo pag lambuten ka wag kana pumalag\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Pag kakalabanin mo ako dapat may anim na immortality ka\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-
-  // ENGLISH JARGON & HIGH-FREQUENCY SLANG BANATS:
-  "Your existential irrelevance is genuinely astounding bro, go touch some organic vegetation\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Lmao imagine manifesting this much cognitive dissonance in a public chat room, literally mid\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your intellectual capacity is severely underperforming, kindly log off and recalculate your life choices\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Stop barking, your logical fallacies are giving everyone here a severe migraine\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Bro is yapping with zero factual foundation, go fix your abysmal attention span\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your pseudo-intellectual banter is highly redundant and lacks basic cognitive coherence\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Imagine having such an embarrassing lack of self-awareness, go upgrade your outdated processor\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your arguments are completely void of substance, pure background noise at this point\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Lmfao bro is experiencing catastrophic ego dissolution over a text message, sit down NPC\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "The level of desperation in your syntax is utterly hilarious, take a deep breath\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "You're literally projecting your internal insecurities with maximum velocity, go touch grass\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your verbal output is mathematically insignificant to my existence, try harder kid\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Bro is malding so hard his blood pressure is spiking through the monitor\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your entire personality seems to suffer from chronic emotional volatility, go get some therapy\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Lmao zero aura, zero eloquence, pure sub-par commentary from a certified dummy account\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your cognitive capabilities are operating at a severe deficit today, log off for your own good\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Stop typing, your atrocious vocabulary is polluting the bandwidth of this thread\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Bro thinks he's imposing, but he's just exhibiting micro-aggression with zero impact\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your argument is a textbook definition of utter irrelevance, go read a dictionary\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Hahahaha keep typing paragraphs, your emotional instability is highly entertaining\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your cognitive delay is mathematically measurable, kindly recalibrate your braincells\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Bro is emitting severe NPC behavior with zero developmental progression\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Imagine relying on hyperbole because your fundamental logic is structurally compromised\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your presence here is an absolute detriment to the overall quality of conversation\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Lmao your pathetic attempts at intellectual dominance are completely laughable\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Your argumentative architecture has collapsed under the weight of your own incompetence\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Bro is genuinely struggling with basic comprehension, someone send this dummy back to primary school\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "The statistical probability of you saying something intelligent is virtually zero\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "Stop wasting my processing power with your low-tier, uninspired drivel\n\n—.GG/SLEEPIN4LGNG💫💤💤"
+  "hahahahaha sira social life mo saken tabaka",
+  "mag dasal ka latin baka siguro mawala pa ako",
+  "pag hindi mo na kaya mag quit dummy ka na ha",
+  "e sabe ko naman sayo pag lambuten ka wag kana pumalag",
+  "Pag kakalabanin mo ako dapat may anim na immortality ka",
+  "Your existential irrelevance is genuinely astounding bro, go touch some organic vegetation",
+  "Lmao imagine manifesting this much cognitive dissonance in a public chat room, literally mid",
+  "Your intellectual capacity is severely underperforming, kindly log off and recalculate your life choices",
+  "Stop barking, your logical fallacies are giving everyone here a severe migraine",
+  "Bro is yapping with zero factual foundation, go fix your abysmal attention span"
 ];
 
-// MGA RESPO KAPAG NUMERO O SPAM
 const NUMBER_INTERCEPT_RESPONSES = [
-  "🛑 Your numerical enumeration will not compensate for your lack of cognitive substance\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "📊 Keep counting all you want, your input remains mathematically irrelevant\n\n—.GG/SLEEPIN4LGNG💫💤💤",
-  "💤 Sequential spamming won't elevate your abysmal standing in this discussion\n\n—.GG/SLEEPIN4LGNG💫💤💤"
+  "🛑 Your numerical enumeration will not compensate for your lack of cognitive substance",
+  "📊 Keep counting all you want, your input remains mathematically irrelevant",
+  "💤 Sequential spamming won't elevate your abysmal standing in this discussion"
 ];
 
-function loadData() {
+// File I/O Helpers
+function loadAllData() {
   try {
     if (fs.existsSync(DATA_PATH)) {
       return JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
@@ -81,10 +95,10 @@ function loadData() {
   } catch (err) {
     console.error("[BANAT-ENGINE] Load error:", err);
   }
-  return { active: false, targetID: null, targetName: null };
+  return {};
 }
 
-function saveData(data) {
+function saveAllData(data) {
   try {
     fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
   } catch (err) {
@@ -92,13 +106,96 @@ function saveData(data) {
   }
 }
 
+function getGroupConfig(threadID) {
+  const allData = loadAllData();
+  return allData[threadID] || { active: false, targetID: null, targetName: null, count: 0 };
+}
+
+function setGroupConfig(threadID, config) {
+  const allData = loadAllData();
+  allData[threadID] = config;
+  saveAllData(allData);
+}
+
 function isCountingOrNumberSpam(text) {
   const clean = text.trim();
   return /^\d+$/.test(clean) || /^#?\d+[\.\-\)]?$/.test(clean);
 }
 
-function getHumanDelay() {
-  return Math.floor(Math.random() * 1000) + 2000;
+function getHumanSpeedDelay() {
+  return Math.floor(Math.random() * 1000) + 800;
+}
+
+function getSmartCounterReply(text) {
+  const lowerText = text.toLowerCase();
+  for (const item of CONTEXTUAL_RESPONSES) {
+    if (item.keywords.some((kw) => lowerText.includes(kw))) {
+      const randomIndex = Math.floor(Math.random() * item.replies.length);
+      return item.replies[randomIndex];
+    }
+  }
+  return null;
+}
+
+// FORMATTER NG RESIBO / COUNT TRACKER
+function formatReceipt(text, count, targetName) {
+  const dateStr = new Date().toLocaleTimeString("en-US", { timeZone: "Asia/Manila" });
+  return (
+    `🧾 [ RESIBO TRACKER #${count} ]\n` +
+    `👤 Target: ${targetName ? "@" + targetName : "Global"}\n` +
+    `⏰ Time: ${dateStr}\n` +
+    `💬 Message: ${text}\n\n` +
+    `—.GG/SLEEPIN4LGNG💫💤💤`
+  );
+}
+
+// 30-SECOND AUTO-COUNT TIMER ENGINE
+function startAutoCountTimer(api, threadID, targetID, targetName) {
+  stopAutoCountTimer(threadID);
+
+  // 30 Seconds Delay para sa Auto-Count
+  const timer = setTimeout(() => {
+    const config = getGroupConfig(threadID);
+    if (!config.active) return;
+
+    config.count = (config.count || 0) + 1;
+    setGroupConfig(threadID, config);
+
+    const tauntList = [
+      "30 seconds na nakalipas, tumigil ka na? ubos na ba stock ng utak mo?",
+      "30 seconds counting... bakit tumahimik ka na dyan? nagpatulong ka na ba sa mama mo?",
+      "30s stall! bilisan mo mag-type, halatang hirap ka na pumalag.",
+      "counting... hindi ka na makasagot sa resibo natin, balik ka na sa lobby."
+    ];
+
+    const chosenTaunt = tauntList[Math.floor(Math.random() * tauntList.length)];
+    const formattedMessage = formatReceipt(chosenTaunt, config.count, targetName);
+
+    let payload = formattedMessage;
+    if (targetID && targetName) {
+      payload = {
+        body: formattedMessage,
+        mentions: [{ id: targetID, tag: `@${targetName}` }]
+      };
+    }
+
+    api.sendMessage(payload, threadID, (err, info) => {
+      if (!err && info && info.messageID) {
+        api.setMessageReaction("💫", info.messageID, () => {}, true);
+      }
+      // I-loop ulit ang 30-seconds auto-count hanggang sa sumagot ang target
+      startAutoCountTimer(api, threadID, targetID, targetName);
+    });
+  }, 30000); // 30000 ms = 30 seconds
+
+  autoCountTimers.set(threadID, timer);
+}
+
+function stopAutoCountTimer(threadID) {
+  if (autoCountTimers.has(threadID)) {
+    clearTimeout(autoCountTimers.get(threadID));
+    autoCountTimers.delete(threadID);
+  }
 }
 
 // ===== EVENT HANDLER =====
@@ -109,31 +206,28 @@ module.exports.handleEvent = async function ({ api, event }) {
   const cleanBody = body.trim();
   const isSenderAdmin = ADMIN_IDS.includes(senderID.toString());
 
-  // Huwag pansinin ang sariling chat ng bot
   if (senderID === api.getCurrentUserID()) return;
 
-  // Suriin kung nag-mula sa command / may prefix
   const isCommand = PREFIXES.some((p) => cleanBody.startsWith(p));
 
-  // ABSOLUTE IGNORE: Kapag HINDI Admin at nag-type ng command
   if (!isSenderAdmin && isCommand) {
     if (userSpamTimers.has(senderID)) {
       clearTimeout(userSpamTimers.get(senderID));
       userSpamTimers.delete(senderID);
     }
-    return; // Agad na titigil at walang anumang ireresponde
+    return;
   }
 
-  // Kung Admin naman at command ang itinype, i-ignore sa event handler para sa module.run mag-process
   if (isSenderAdmin && isCommand) return;
 
-  const data = loadData();
-  if (!data.active) return;
+  const config = getGroupConfig(threadID);
+  if (!config.active) return;
 
-  // Kung may naka-target at hindi siya ang nag-chat, ignore
-  if (data.targetID && senderID !== data.targetID) return;
+  if (config.targetID && senderID !== config.targetID) return;
 
-  // Anti-Spam Buffer logic
+  // I-reset ang 30-second timer tuwing magse-send ng chat ang target
+  startAutoCountTimer(api, threadID, config.targetID, config.targetName);
+
   if (userSpamTimers.has(senderID)) {
     clearTimeout(userSpamTimers.get(senderID));
   }
@@ -142,19 +236,26 @@ module.exports.handleEvent = async function ({ api, event }) {
     userSpamTimers.delete(senderID);
 
     try {
-      let chosenText;
+      config.count = (config.count || 0) + 1;
+      setGroupConfig(threadID, config);
 
-      if (isCountingOrNumberSpam(cleanBody)) {
-        chosenText = NUMBER_INTERCEPT_RESPONSES[Math.floor(Math.random() * NUMBER_INTERCEPT_RESPONSES.length)];
-      } else {
-        chosenText = TRASHTALK_BANAT[Math.floor(Math.random() * TRASHTALK_BANAT.length)];
+      let chosenText = getSmartCounterReply(cleanBody);
+
+      if (!chosenText) {
+        if (isCountingOrNumberSpam(cleanBody)) {
+          chosenText = NUMBER_INTERCEPT_RESPONSES[Math.floor(Math.random() * NUMBER_INTERCEPT_RESPONSES.length)];
+        } else {
+          chosenText = TRASHTALK_BANAT[Math.floor(Math.random() * TRASHTALK_BANAT.length)];
+        }
       }
 
-      let payload = chosenText;
-      if (data.targetID && data.targetName) {
+      const formattedMessage = formatReceipt(chosenText, config.count, config.targetName);
+
+      let payload = formattedMessage;
+      if (config.targetID && config.targetName) {
         payload = {
-          body: `@${data.targetName} ${chosenText}`,
-          mentions: [{ id: data.targetID, tag: `@${data.targetName}` }]
+          body: formattedMessage,
+          mentions: [{ id: config.targetID, tag: `@${config.targetName}` }]
         };
       }
 
@@ -171,7 +272,7 @@ module.exports.handleEvent = async function ({ api, event }) {
     } catch (err) {
       console.error("[BANAT-ENGINE Event Error]:", err);
     }
-  }, getHumanDelay());
+  }, getHumanSpeedDelay());
 
   userSpamTimers.set(senderID, timer);
 };
@@ -180,55 +281,62 @@ module.exports.handleEvent = async function ({ api, event }) {
 module.exports.run = async function ({ api, event, args }) {
   const { threadID, messageID, senderID, mentions } = event;
 
-  // ABSOLUTE IGNORE: Kapag hindi Admin ang nag-execute ng /banat command
   if (!ADMIN_IDS.includes(senderID.toString())) {
-    return; // Walang reply, walang error message, walang kahit ano.
+    return;
   }
 
   const sub = (args[0] || "").toLowerCase().trim();
-  const data = loadData();
+  const config = getGroupConfig(threadID);
 
   if (sub === "off") {
-    data.active = false;
-    data.targetID = null;
-    data.targetName = null;
-    saveData(data);
-    return api.sendMessage("—.GG/SLEEPIN4LGNG💫💤💤 [ OFF ]", threadID, messageID);
+    config.active = false;
+    config.targetID = null;
+    config.targetName = null;
+    config.count = 0;
+    setGroupConfig(threadID, config);
+    stopAutoCountTimer(threadID);
+
+    return api.sendMessage("—.GG/SLEEPIN4LGNG💫💤💤 [ OFF - COUNT RESET ]", threadID, messageID);
   }
 
   if (sub === "on") {
     const mentionedKeys = Object.keys(mentions || {});
-    data.active = true;
+    config.active = true;
+    config.count = 0; // Reset count sa panibagong round
 
     if (mentionedKeys.length > 0) {
       const targetID = mentionedKeys[0];
       const targetName = mentions[targetID].replace("@", "");
-      data.targetID = targetID;
-      data.targetName = targetName;
-      saveData(data);
+      config.targetID = targetID;
+      config.targetName = targetName;
+      setGroupConfig(threadID, config);
+
+      startAutoCountTimer(api, threadID, targetID, targetName);
 
       return api.sendMessage(
-        `—.GG/SLEEPIN4LGNG💫💤💤 ACTIVATED\n\n` +
+        `—.GG/SLEEPIN4LGNG💫💤💤 BANAT & COUNT ACTIVATED\n\n` +
         `🎯 Target: ${mentions[targetID]}\n` +
-        `💫 Auto-React: 💫 reaction\n` +
-        `⏳ Duration: Infinite\n` +
-        `⚡ Anti-Spam: Active (2-3s Delay)\n` +
-        `👑 Admin: Authorized`,
+        `🧾 Resibo Tracker: Enabled (#1 Start)\n` +
+        `⏱ Auto-Count Delay: 30 Seconds\n` +
+        `⚡ Response Speed: Fast Human Speed\n` +
+        `👑 Status: Running`,
         threadID,
         messageID
       );
     } else {
-      data.targetID = null;
-      data.targetName = null;
-      saveData(data);
+      config.targetID = null;
+      config.targetName = null;
+      setGroupConfig(threadID, config);
+
+      startAutoCountTimer(api, threadID, null, null);
 
       return api.sendMessage(
-        `—.GG/SLEEPIN4LGNG💫💤💤 GLOBAL ACTIVATED\n\n` +
-        `🌐 Mode: Global\n` +
-        `💫 Auto-React: 💫 reaction\n` +
-        `⏳ Duration: Infinite\n` +
-        `⚡ Anti-Spam: Active (2-3s Delay)\n` +
-        `👑 Admin: Authorized`,
+        `—.GG/SLEEPIN4LGNG💫💤💤 GLOBAL BANAT & COUNT ACTIVATED\n\n` +
+        `🌐 Mode: Global (This GC)\n` +
+        `🧾 Resibo Tracker: Enabled (#1 Start)\n` +
+        `⏱ Auto-Count Delay: 30 Seconds\n` +
+        `⚡ Response Speed: Fast Human Speed\n` +
+        `👑 Status: Running`,
         threadID,
         messageID
       );
@@ -236,7 +344,7 @@ module.exports.run = async function ({ api, event, args }) {
   }
 
   return api.sendMessage(
-    `👑 SLEEPIN4LGNG ENGINE\n\n` +
+    `👑 SLEEPIN4LGNG BANAT ENGINE\n\n` +
     `• /banat on\n` +
     `• /banat on @mention\n` +
     `• /banat off`,
