@@ -2,665 +2,308 @@ const fs = require("fs");
 const path = require("path");
 
 module.exports.config = {
-  name: "banat",
-  version: "18.0.0",
-  hasPermission: 0,
+  name: "sinzu",
+  version: "20.1.0",
+  hasPermission: 2, // Admin Only Permission
   credits: "sinzu",
-  description: "Advanced Auto-Banat Engine - 30s Auto-Count with Receipt Tracker",
+  description: "Fast Response Engine (Per-Thread / Admin Only / No Emoji Reactions)",
   usePrefix: true,
-  commandCategory: "Fun",
-  usages:
-    "• /banat on — I-ON ang global auto-banat sa GC na ito\n" +
-    "• /banat on @mention — I-target ang isang tao sa GC na ito\n" +
-    "• /banat off — Patayin ang Banat Engine sa GC na ito",
+  commandCategory: "Admin",
+  usages: "/sinzu on | off | status | add <text> | listlines",
   cooldowns: 2
 };
 
 // Admin ID Configuration
-const ADMIN_IDS = ["61594240921272", "61591430164540", "61593900495161", "61594251452411"];
-const DATA_PATH = path.join(__dirname, "banat_config.json");
+const ADMIN_IDS = [
+  "61593900495161",
+  "61594251452411",
+  "61593919965251",
+  "61594535751028"
+];
+
+const DATA_PATH = path.join(__dirname, "sinzu_data.json");
 const PREFIXES = ["/", "!", ".", "?", "-", "$", "#"];
 
-// In-memory Timers & Counters
-const userSpamTimers = new Map();
-const autoCountTimers = new Map();
-
-// ===== SMART FLEXIBLE REPLIES =====
-const CONTEXTUAL_RESPONSES = [
-  {
-    keywords: ["aso", "asoka", "tuta"],
-    replies: [
-      "hindi ako aso, tao ako. ikaw ung gubat ang pinagmulan, mukha kang unggoy na tumakas sa zoo",
-      "lakas mo magsalita ng aso, eh sa amoy pa lang ng hininga mo mukha ka nang garapata",
-      "tahol ka nang tahol dyan, sino sa atin ang totoong aso? takot ka naman lumaban nang patas"
-    ]
-  },
-  {
-    keywords: ["bobo", "tanga", "inept", "gago"],
-    replies: [
-      "nagsalita ang academic failure, ayusin mo muna grammar mo bago ka magsalita ng bobo",
-      "ako bobo? baka kapag sinukat IQ natin dalawa, mag-negative sa’yo sa sobrang bagal ng utak mo",
-      "lakas ng loob mong tumawag ng tanga eh maski sarili mong buhay hindi mo maayos-ayos"
-    ]
-  },
-  {
-    keywords: ["tangina", "tangina mo", "gco"],
-    replies: [
-      "idamay mo pa magulang mo sa pagkatalo mo dito, umiyak ka na lang sa sulok nyo",
-      "puro ka mura wala namang laman argumento mo, halatang kapos sa aruga",
-      "galit na galit gustong manakit? mura pa lang nilalapag mo ibig sabihin talo ka na"
-    ]
-  },
-  {
-    keywords: ["mama mo", "papa mo", "magulang"],
-    replies: [
-      "huwag mong idamay pamilya mo dito, nahihiya na nga sila sa ginagawa mong kakornihan",
-      "puro ka mama mo, ikaw nga hindi maipagmalaki ng magulang mo sa mga kapitbahay nyo"
-    ]
-  },
-  {
-    keywords: ["duwag", "takot", "pumalag"],
-    replies: [
-      "sino ang duwag? kanina ka pa pilit gumagawa ng dahilan kasi nararamdaman mo nang patapos ka na",
-      "pumalag ka muna nang maayos bago ka magsalita tungkol sa pagiging duwag"
-    ]
-  }
+// SENO RESPONSES LIST
+const DEFAULT_SENO_LINES = [
+  "nawala na si seno", "kumain na si seno", "umalis na si seno", "dumating na si seno",
+  "natulog na si seno", "gumising na si seno", "naligo na si seno", "bumangon na si seno",
+  "umupo na si seno", "tumayo na si seno", "lumabas na si seno", "pumasok na si seno",
+  "umuwi na si seno", "naglakad na si seno", "tumakbo na si seno", "huminto na si seno",
+  "nagsimula na si seno", "natapos na si seno", "naglaro na si seno", "nagpahinga na si seno",
+  "nagsulat na si seno", "nagbasa na si seno", "nagsalita na si seno", "tumahimik na si seno",
+  "natawa na si seno", "umiyak na si seno", "ngumiti na si seno", "nag-isip na si seno",
+  "nakalimot na si seno", "naalala na si seno", "naghanap na si seno", "nakita na si seno",
+  "nagtago na si seno", "nahuli na si seno", "nakawala na si seno", "nahulog na si seno",
+  "umakyat na si seno", "bumaba na si seno", "tumalon na si seno", "lumangoy na si seno",
+  "tumawid na si seno", "bumalik na si seno", "nagpaalam na si seno", "nakipag-usap na si seno",
+  "nakinig na si seno", "sumagot na si seno", "nagtanong na si seno", "nagdesisyon na si seno",
+  "nagbago na si seno", "nagpatuloy na si seno", "naghintay na si seno", "nagmadali na si seno",
+  "nauna na si seno", "sumunod na si seno", "naiwan na si seno", "nakabalik na si seno",
+  "nakauwi na si seno", "nakalabas na si seno", "nakapasok na si seno", "nakaupo na si seno",
+  "nakahiga na si seno", "nakabangon na si seno", "nakapahinga na si seno", "nakangiti na si seno",
+  "nakatawa na si seno", "nakaiyak na si seno", "nakapagsalita na si seno", "nakapagsulat na si seno",
+  "nakabasa na si seno", "nakakita na si seno", "nakarinig na si seno", "nakahawak na si seno",
+  "nakakuha na si seno", "nakapagbigay na si seno", "nakapagtago na si seno", "nakahanap na si seno",
+  "nakaisip na si seno", "nakapili na si seno", "nakapagdesisyon na si seno", "nakapaghanda na si seno",
+  "nakapagtapos na si seno", "nakapaglaro na si seno", "nakapunta na si seno", "nakasakay na si seno",
+  "nakababa na si seno", "nakasampa na si seno", "nakatawid na si seno", "nakalakad na si seno",
+  "nakatakbo na si seno", "nakatalon na si seno", "nakalangoy na si seno", "nakahinto na si seno",
+  "nakapagsimula na si seno", "nakapagpatuloy na si seno", "nakapaghintay na si seno", "nakapagpaalam na si seno",
+  "nakipagkita na si seno", "nakipaglaro na si seno", "nakipagtulungan na si seno", "nakipagkaibigan na si seno",
+  "nakipagbati na si seno", "nakipag-usap na si seno", "nakipagkwentuhan na si seno", "nagbiro na si seno",
+  "nagpatawa na si seno", "nagulat na si seno", "natakot na si seno", "nag-alala na si seno",
+  "naging masaya na si seno", "naging malungkot na si seno", "naging tahimik na si seno", "naging abala na si seno",
+  "naging handa na si seno", "naging pagod na si seno", "naging gutom na si seno", "naging busog na si seno",
+  "naging antok na si seno", "naging gising na si seno", "nagutom na si seno", "nabusog na si seno",
+  "nauhaw na si seno", "uminom na si seno", "naghugas na si seno", "nagsipilyo na si seno",
+  "nagbihis na si seno", "nagpalit na si seno", "nagsuklay na si seno", "nag-ayos na si seno",
+  "nagluto na si seno", "naghanda na si seno", "naghain na si seno", "nagtimpla na si seno",
+  "nagkape na si seno", "nagbaon na si seno", "namili na si seno", "bumili na si seno",
+  "nagbayad na si seno", "nag-ipon na si seno", "gumastos na si seno", "nagtrabaho na si seno",
+  "nag-aral na si seno", "nagpraktis na si seno", "nagsanay na si seno", "nag-ensayo na si seno",
+  "nagturo na si seno", "natuto na si seno", "nagtapos na si seno", "pumasok na si seno",
+  "nag-review na si seno", "nakapasa na si seno", "bumagsak na si seno", "nag-exam na si seno",
+  "nag-quiz na si seno", "nag-report na si seno", "nag-present na si seno", "nagpasa na si seno",
+  "nagdrawing na si seno", "nagkulay na si seno", "nagdisenyo na si seno", "nag-edit na si seno",
+  "nag-type na si seno", "nag-print na si seno", "nag-save na si seno", "nag-download na si seno",
+  "nag-upload na si seno", "nag-send na si seno", "nag-reply na si seno", "nag-chat na si seno",
+  "nag-text na si seno", "tumawag na si seno", "nag-video call na si seno", "nag-online na si seno",
+  "nag-offline na si seno", "nag-post na si seno", "nag-comment na si seno", "nag-like na si seno",
+  "nag-share na si seno", "nag-follow na si seno", "nag-unfollow na si seno", "nag-subscribe na si seno",
+  "nag-scroll na si seno", "nag-search na si seno", "nag-click na si seno", "nag-open na si seno",
+  "nag-close na si seno", "nag-refresh na si seno", "nag-update na si seno", "nag-install na si seno",
+  "nag-uninstall na si seno", "nag-restart na si seno", "nag-charge na si seno", "na-lowbat na si seno",
+  "nag-on na si seno", "nag-off na si seno", "nag-connect na si seno", "nag-disconnect na si seno",
+  "nag-record na si seno", "nag-picture na si seno", "nag-video na si seno", "nag-selfie na si seno",
+  "nag-filter na si seno", "nag-delete na si seno", "nag-copy na si seno", "nag-paste na si seno",
+  "nag-receive na si seno", "nag-check na si seno", "nag-verify na si seno", "nag-confirm na si seno",
+  "nag-cancel na si seno", "nag-report na si seno", "nag-block na si seno", "nag-unblock na si seno",
+  "nag-mute na si seno", "nag-unmute na si seno", "nag-invite na si seno", "nag-accept na si seno",
+  "nag-decline na si seno", "nag-join na si seno", "nag-leave na si seno", "nag-create na si seno",
+  "nag-change na si seno", "nag-set na si seno", "nag-reset na si seno", "nag-load na si seno",
+  "nag-play na si seno", "nag-pause na si seno", "nag-stop na si seno", "nag-skip na si seno",
+  "nag-rewind na si seno", "nag-forward na si seno", "nag-kanta na si seno", "sumayaw na si seno",
+  "tumugtog na si seno", "nag-rap na si seno", "nag-perform na si seno", "nag-vlog na si seno",
+  "nag-stream na si seno", "nag-live na si seno", "nag-game na si seno", "nag-rank na si seno",
+  "nag-grind na si seno", "nag-farm na si seno", "nag-level up na si seno", "nag-win na si seno",
+  "nag-lose na si seno", "nag-draw na si seno", "nag-carry na si seno", "nag-clutch na si seno",
+  "nag-push na si seno", "nag-defend na si seno", "nag-attack na si seno", "nag-rotate na si seno",
+  "nag-lobby na si seno", "nag-queue na si seno", "nag-match na si seno", "nag-quit na si seno",
+  "nag-respawn na si seno", "nag-unlock na si seno", "nag-upgrade na si seno", "nag-equip na si seno",
+  "nag-customize na si seno", "nag-set up na si seno", "nag-test na si seno", "nag-debug na si seno",
+  "nag-code na si seno", "nag-build na si seno", "nag-deploy na si seno", "nag-host na si seno",
+  "nag-run na si seno", "nag-fix na si seno", "nag-patch na si seno", "nag-scan na si seno",
+  "nag-backup na si seno", "nag-restore na si seno", "nag-sync na si seno", "nag-link na si seno",
+  "nag-register na si seno", "nag-sign up na si seno", "nag-sign in na si seno", "nag-login na si seno",
+  "nag-logout na si seno", "nag-create profile na si seno", "nag-edit profile na si seno",
+  "nag-change name na si seno", "nag-upload pfp na si seno", "nag-change pfp na si seno",
+  "nag-set bio na si seno", "nag-edit bio na si seno", "nag-add friend na si seno",
+  "nag-remove friend na si seno", "nag-follow ulit si seno", "nag-message na si seno",
+  "nag-react na si seno", "nag-repost na si seno", "nag-story na si seno", "nag-view story na si seno",
+  "nag-delete story na si seno", "nag-save post na si seno", "nag-unsave post na si seno",
+  "nag-pin post na si seno", "nag-unpin post na si seno", "nag-tag na si seno", "nag-mention na si seno",
+  "nag-browse na si seno", "nag-explore na si seno", "nag-discover na si seno", "nag-check feed na si seno",
+  "nag-refresh feed na si seno", "nag-open notification na si seno", "nag-clear notification na si seno",
+  "nag-check inbox na si seno", "nag-clear inbox na si seno", "nag-accept request na si seno",
+  "nag-decline request na si seno", "nag-send request na si seno", "nag-cancel request na si seno",
+  "nag-create group na si seno", "nag-join group na si seno", "nag-leave group na si seno",
+  "nag-invite sa group si seno", "nag-chat sa group si seno", "nag-send message na si seno",
+  "nag-delete message na si seno", "nag-pin message na si seno", "nag-unpin message na si seno",
+  "nag-react sa message si seno", "nag-reply sa message si seno", "nag-forward message na si seno",
+  "nag-search message na si seno", "nag-archive chat na si seno", "nag-unarchive chat na si seno",
+  "nag-mute chat na si seno", "nag-unmute chat na si seno", "nag-block user na si seno",
+  "nag-unblock user na si seno", "nag-report user na si seno", "nag-check profile na si seno",
+  "nag-view profile na si seno", "nag-follow page na si seno", "nag-like page na si seno",
+  "nag-create page na si seno", "nag-edit page na si seno", "nag-post sa page si seno",
+  "nag-delete post si seno", "nag-share post si seno", "nag-invite ng friends si seno",
+  "nag-accept invite si seno", "nag-decline invite si seno", "nag-open app na si seno",
+  "nag-close app na si seno", "nag-launch app na si seno", "nag-exit app na si seno",
+  "nag-restart app na si seno", "nag-update app na si seno", "nag-install app na si seno",
+  "nag-uninstall app na si seno", "nag-clear cache si seno", "nag-check settings si seno",
+  "nag-change settings si seno", "nag-save settings si seno", "nag-reset settings si seno",
+  "nag-enable na si seno", "nag-disable na masi seno", "nag-turn on na si seno",
+  "nag-turn off na si seno", "nag-activate na si seno", "nag-deactivate na si seno",
+  "nag-lock na si seno", "nag-unlock na si seno", "nag-secure na si seno", "nag-protect na si seno",
+  "nag-check status na si seno", "nag-change status na si seno", "nag-set status na si seno",
+  "nag-clear status na si seno", "nag-update status na si seno", "nag-post status na si seno",
+  "nag-view status na si seno", "nag-delete status na si seno", "nag-check story na si seno",
+  "nag-post story na si seno", "nag-view story na si seno", "nag-react sa story si seno",
+  "nag-reply sa story si seno", "nag-share story na si seno", "nag-open link na si seno",
+  "nag-copy link na si seno", "nag-share link na si seno", "nag-check link na si seno",
+  "nag-send link na si seno", "nag-receive link na si seno", "nag-open file na si seno",
+  "nag-send file na si seno", "nag-receive file na si seno", "nag-download file na si seno",
+  "nag-upload file na si seno", "nag-delete file na si seno", "nag-save file na si seno",
+  "nag-open photo na si seno", "nag-send photo na si seno", "nag-receive photo na si seno",
+  "nag-delete photo na si seno", "nag-save photo na si seno", "nag-open video na si seno",
+  "nag-send video na si seno", "nag-receive video na si seno", "nag-delete video na si seno",
+  "nag-save video na si seno", "nag-open music na si seno", "nag-send music na si seno",
+  "nag-receive music na si seno", "nag-delete music na si seno", "nag-save music na si seno",
+  "nagbukas na si seno", "nagsara na si seno", "nagpakita na si seno", "nandito na si seno",
+  "nandoon na si seno", "papunta na si seno", "pauwi na si seno", "paalis na si seno",
+  "darating na si seno", "nakarating na si seno", "naghihintay na si seno", "naghahanda na si seno",
+  "nagtatrabaho na si seno", "nag-aaral na si seno", "nagpapahinga na si seno", "naglalaro na si seno",
+  "kumakain na si seno", "umiinom na si seno", "natutulog na si seno", "gumigising na si seno",
+  "naliligo na si seno", "nagbibihis na si seno", "naglalakad na si seno", "tumatakbo na si seno",
+  "nagsasalita na si seno", "nakikinig na si seno", "tumatawa na si seno", "umiiyak na si seno",
+  "ngumingiti na si seno", "nag-iisip na si seno", "naghahanap na si seno", "nagtatago na si seno",
+  "naghihintay na si seno", "nagmamadali na si seno", "nagsisimula na si seno", "nagpapatuloy na si seno",
+  "humihinto na si seno", "bumabalik na si seno", "umaalis na si seno", "dumarating na si seno",
+  "umaakyat na si seno", "bumababa na si seno", "tumatalon na si seno", "lumalangoy na si seno",
+  "lumilipad na si seno", "tumatawid na si seno", "nagpapasalamat na si seno", "humihingi na si seno",
+  "nagbibigay na si seno", "tumatanggap na si seno", "nagtitiwala na si seno", "umaasa na si seno",
+  "nangangarap na si seno", "nagpaplano na si seno", "nagpapasya na si seno", "nagbabago na si seno",
+  "nagsusumikap na si seno", "nagtagumpay na si seno", "nakamit na ni seno", "nakakuha na si seno",
+  "nahanap na ni seno", "napili na ni seno", "natapos na ni seno", "nagsara na si seno",
+  "nagpaalam na si seno", "nagkita na sina seno", "nagbati na si seno", "nag-usap na si seno",
+  "nagkasundo na si seno", "nagplano na si seno", "nagbalik na si seno", "nagwagi na si seno",
+  "natalo na si seno", "nakaraos na si seno", "nakaligtas na si seno", "nakabangon na si seno",
+  "nakapagpahinga na si seno", "nakapaghanda na si seno", "nakapag-aral na si seno", "nakapagtrabaho na si seno",
+  "nakapaglaro na si seno", "nakapaglakbay na si seno", "nakauwi na rin si seno"
 ];
 
-const TRASHTALK_BANAT = [
-  "Kenjutsu 🩸🥷🏿",
-  "Iaijutsu 🩸🥷🏿",
-  "Battojutsu 🩸🥷🏿",
-  "Kendo 🩸🥷🏿",
-  "Ninjutsu 🩸🥷🏿",
-  "Taijutsu 🩸🥷🏿",
-  "Genjutsu 🩸🥷🏿",
-  "Shurikenjutsu 🩸🥷🏿",
-  "Kusarigamajutsu 🩸🥷🏿",
-  "Sojutsu 🩸🥷🏿",
-  "Bojutsu 🩸🥷🏿",
-  "Jojutsu 🩸🥷🏿",
-  "Kyujutsu 🩸🥷🏿",
-  "Naginatajutsu 🩸🥷🏿",
-  "Tantojutsu 🩸🥷🏿",
-  "Niten Ichi-ryu 🩸🥷🏿",
-  "Hiken 🩸🥷🏿",
-  "Iai 🩸🥷🏿",
-  "Shinobi-iri 🩸🥷🏿",
-  "Kakuremi 🩸🥷🏿",
-  "Kagegakure 🩸🥷🏿",
-  "Meisaigakure 🩸🥷🏿",
-  "Shunshin 🩸🥷🏿",
-  "Kawarimi 🩸🥷🏿",
-  "Bunshin 🩸🥷🏿",
-  "Henge 🩸🥷🏿",
-  "Kuchiyose 🩸🥷🏿",
-  "Fuuinjutsu 🩸🥷🏿",
-  "Chakra Flow 🩸🥷🏿",
-  "Chakra Blade 🩸🥷🏿",
-  "Chakra Edge 🩸🥷🏿",
-  "Chakra Guard 🩸🥷🏿",
-  "Chakra Step 🩸🥷🏿",
-  "Chakra Focus 🩸🥷🏿",
-  "Chakra Sense 🩸🥷🏿",
-  "Chakra Control 🩸🥷🏿",
-  "Wind Style 🩸🥷🏿",
-  "Water Style 🩸🥷🏿",
-  "Fire Style 🩸🥷🏿",
-  "Lightning Style 🩸🥷🏿",
-  "Earth Style 🩸🥷🏿",
-  "Mist Style 🩸🥷🏿",
-  "Shadow Style 🩸🥷🏿",
-  "Moon Style 🩸🥷🏿",
-  "Storm Style 🩸🥷🏿",
-  "Flame Style 🩸🥷🏿",
-  "Frost Style 🩸🥷🏿",
-  "Cloud Style 🩸🥷🏿",
-  "Rain Style 🩸🥷🏿",
-  "River Style 🩸🥷🏿",
-  "Mountain Style 🩸🥷🏿",
-  "Forest Style 🩸🥷🏿",
-  "Leaf Style 🩸🥷🏿",
-  "Dawn Style 🩸🥷🏿",
-  "Dusk Style 🩸🥷🏿",
-  "Star Style 🩸🥷🏿",
-  "Sky Style 🩸🥷🏿",
-  "Thunder Step 🩸🥷🏿",
-  "Wind Step 🩸🥷🏿",
-  "Silent Step 🩸🥷🏿",
-  "Shadow Step 🩸🥷🏿",
-  "Phantom Step 🩸🥷🏿",
-  "Swift Step 🩸🥷🏿",
-  "Moon Step 🩸🥷🏿",
-  "Cloud Step 🩸🥷🏿",
-  "Mist Step 🩸🥷🏿",
-  "River Step 🩸🥷🏿",
-  "Dragon Step 🩸🥷🏿",
-  "Fox Step 🩸🥷🏿",
-  "Tiger Step 🩸🥷🏿",
-  "Eagle Step 🩸🥷🏿",
-  "Serpent Step 🩸🥷🏿",
-  "Crane Step 🩸🥷🏿",
-  "Lotus Step 🩸🥷🏿",
-  "Bamboo Step 🩸🥷🏿",
-  "Falling Leaf 🩸🥷🏿",
-  "Rising Leaf 🩸🥷🏿",
-  "Dancing Leaf 🩸🥷🏿",
-  "Silent Leaf 🩸🥷🏿",
-  "Flying Leaf 🩸🥷🏿",
-  "Autumn Leaf 🩸🥷🏿",
-  "Moonlight Blade 🩸🥷🏿",
-  "Sunrise Blade 🩸🥷🏿",
-  "Dusk Blade 🩸🥷🏿",
-  "Dawn Blade 🩸🥷🏿",
-  "Shadow Blade 🩸🥷🏿",
-  "Phantom Blade 🩸🥷🏿",
-  "Crimson Blade 🩸🥷🏿",
-  "Silver Blade 🩸🥷🏿",
-  "Golden Blade 🩸🥷🏿",
-  "Jade Blade 🩸🥷🏿",
-  "Obsidian Blade 🩸🥷🏿",
-  "Ivory Blade 🩸🥷🏿",
-  "Moon Blade 🩸🥷🏿",
-  "Storm Blade 🩸🥷🏿",
-  "Wind Blade 🩸🥷🏿",
-  "Flame Blade 🩸🥷🏿",
-  "Frost Blade 🩸🥷🏿",
-  "Cloud Blade 🩸🥷🏿",
-  "River Blade 🩸🥷🏿",
-  "Heaven Blade 🩸🥷🏿",
-  "Silent Blade 🩸🥷🏿",
-  "Swift Blade 🩸🥷🏿",
-  "Hidden Blade 🩸🥷🏿",
-  "Twin Blade 🩸🥷🏿",
-  "Spirit Blade 🩸🥷🏿",
-  "Guardian Blade 🩸🥷🏿",
-  "Dragon Blade 🩸🥷🏿",
-  "Tiger Blade 🩸🥷🏿",
-  "Fox Blade 🩸🥷🏿",
-  "Crane Blade 🩸🥷🏿",
-  "Serpent Blade 🩸🥷🏿",
-  "Lotus Blade 🩸🥷🏿",
-  "Bamboo Blade 🩸🥷🏿",
-  "Heavenly Blade 🩸🥷🏿",
-  "Celestial Blade 🩸🥷🏿",
-  "Eternal Blade 🩸🥷🏿",
-  "Ancient Blade 🩸🥷🏿",
-  "Sacred Blade 🩸🥷🏿",
-  "Noble Blade 🩸🥷🏿",
-  "Royal Blade 🩸🥷🏿",
-  "Samurai Spirit 🩸🥷🏿",
-  "Warrior Spirit 🩸🥷🏿",
-  "Shinobi Spirit 🩸🥷🏿",
-  "Silent Spirit 🩸🥷🏿",
-  "Moon Spirit 🩸🥷🏿",
-  "Dragon Spirit 🩸🥷🏿",
-  "Fox Spirit 🩸🥷🏿",
-  "Tiger Spirit 🩸🥷🏿",
-  "Crane Spirit 🩸🥷🏿",
-  "Wolf Spirit 🩸🥷🏿",
-  "Eagle Spirit 🩸🥷🏿",
-  "Storm Spirit 🩸🥷🏿",
-  "Wind Spirit 🩸🥷🏿",
-  "Flame Spirit 🩸🥷🏿",
-  "Water Spirit 🩸🥷🏿",
-  "Forest Spirit 🩸🥷🏿",
-  "Mountain Spirit 🩸🥷🏿",
-  "Sky Spirit 🩸🥷🏿",
-  "Star Spirit 🩸🥷🏿",
-  "Lotus Spirit 🩸🥷🏿",
-  "Iron Guard 🩸🥷🏿",
-  "Steel Guard 🩸🥷🏿",
-  "Moon Guard 🩸🥷🏿",
-  "Shadow Guard 🩸🥷🏿",
-  "Silent Guard 🩸🥷🏿",
-  "Dragon Guard 🩸🥷🏿",
-  "Tiger Guard 🩸🥷🏿",
-  "Crane Guard 🩸🥷🏿",
-  "Storm Guard 🩸🥷🏿",
-  "Wind Guard 🩸🥷🏿",
-  "Flame Guard 🩸🥷🏿",
-  "Frost Guard 🩸🥷🏿",
-  "Cloud Guard 🩸🥷🏿",
-  "River Guard 🩸🥷🏿",
-  "Forest Guard 🩸🥷🏿",
-  "Mountain Guard 🩸🥷🏿",
-  "Sky Guard 🩸🥷🏿",
-  "Dawn Guard 🩸🥷🏿",
-  "Dusk Guard 🩸🥷🏿",
-  "Lotus Guard 🩸🥷🏿",
-  "Dragon Stance 🩸🥷🏿",
-  "Tiger Stance 🩸🥷🏿",
-  "Crane Stance 🩸🥷🏿",
-  "Wolf Stance 🩸🥷🏿",
-  "Fox Stance 🩸🥷🏿",
-  "Serpent Stance 🩸🥷🏿",
-  "Eagle Stance 🩸🥷🏿",
-  "Moon Stance 🩸🥷🏿",
-  "Sun Stance 🩸🥷🏿",
-  "Storm Stance 🩸🥷🏿",
-  "Wind Stance 🩸🥷🏿",
-  "Flame Stance 🩸🥷🏿",
-  "Water Stance 🩸🥷🏿",
-  "Earth Stance 🩸🥷🏿",
-  "Mountain Stance 🩸🥷🏿",
-  "Forest Stance 🩸🥷🏿",
-  "Cloud Stance 🩸🥷🏿",
-  "Mist Stance 🩸🥷🏿",
-  "Dawn Stance 🩸🥷🏿",
-  "Dusk Stance 🩸🥷🏿",
-  "Silent Stance 🩸🥷🏿",
-  "Phantom Stance 🩸🥷🏿",
-  "Shadow Stance 🩸🥷🏿",
-  "Iron Stance 🩸🥷🏿",
-  "Steel Stance 🩸🥷🏿",
-  "Lotus Stance 🩸🥷🏿",
-  "Bamboo Stance 🩸🥷🏿",
-  "Sword Flow 🩸🥷🏿",
-  "Blade Flow 🩸🥷🏿",
-  "Chakra Flow 🩸🥷🏿",
-  "Wind Flow 🩸🥷🏿",
-  "Water Flow 🩸🥷🏿",
-  "Flame Flow 🩸🥷🏿",
-  "Shadow Flow 🩸🥷🏿",
-  "Moon Flow 🩸🥷🏿",
-  "Storm Flow 🩸🥷🏿",
-  "River Flow 🩸🥷🏿",
-  "Silent Flow 🩸🥷🏿",
-  "Dragon Flow 🩸🥷🏿",
-  "Tiger Flow 🩸🥷🏿",
-  "Crane Flow 🩸🥷🏿",
-  "Lotus Flow 🩸🥷🏿",
-  "Bamboo Flow 🩸🥷🏿",
-  "Heaven Flow 🩸🥷🏿",
-  "Spirit Flow 🩸🥷🏿",
-  "Noble Flow 🩸🥷🏿",
-  "Royal Flow 🩸🥷🏿",
-  "Dragon Slash 🩸🥷🏿",
-  "Tiger Slash 🩸🥷🏿",
-  "Crane Slash 🩸🥷🏿",
-  "Wolf Slash 🩸🥷🏿",
-  "Fox Slash 🩸🥷🏿",
-  "Serpent Slash 🩸🥷🏿",
-  "Eagle Slash 🩸🥷🏿",
-  "Moon Slash 🩸🥷🏿",
-  "Sun Slash 🩸🥷🏿",
-  "Storm Slash 🩸🥷🏿",
-  "Wind Slash 🩸🥷🏿",
-  "Flame Slash 🩸🥷🏿",
-  "Water Slash 🩸🥷🏿",
-  "Frost Slash 🩸🥷🏿",
-  "Cloud Slash 🩸🥷🏿",
-  "Mist Slash 🩸🥷🏿",
-  "Dawn Slash 🩸🥷🏿",
-  "Dusk Slash 🩸🥷🏿",
-  "Silent Slash 🩸🥷🏿",
-  "Phantom Slash 🩸🥷🏿",
-  "Shadow Slash 🩸🥷🏿",
-  "Heaven Slash 🩸🥷🏿",
-  "Celestial Slash 🩸🥷🏿",
-  "Moonlight Slash 🩸🥷🏿",
-  "Sunrise Slash 🩸🥷🏿",
-  "Twilight Slash 🩸🥷🏿",
-  "Whirlwind Slash 🩸🥷🏿",
-  "Rising Slash 🩸🥷🏿",
-  "Falling Slash 🩸🥷🏿",
-  "Cross Slash 🩸🥷🏿",
-  "Twin Slash 🩸🥷🏿",
-  "Swift Slash 🩸🥷🏿",
-  "Silent Draw 🩸🥷🏿",
-  "Swift Draw 🩸🥷🏿",
-  "Moon Draw 🩸🥷🏿",
-  "Shadow Draw 🩸🥷🏿",
-  "Wind Draw 🩸🥷🏿",
-  "Storm Draw 🩸🥷🏿",
-  "Flame Draw 🩸🥷🏿",
-  "Water Draw 🩸🥷🏿",
-  "Dawn Draw 🩸🥷🏿",
-  "Dusk Draw 🩸🥷🏿",
-  "Heaven Draw 🩸🥷🏿",
-  "Dragon Draw 🩸🥷🏿",
-  "Tiger Draw 🩸🥷🏿",
-  "Phantom Draw 🩸🥷🏿",
-  "Silent Guard 🩸🥷🏿",
-  "Iron Guard 🩸🥷🏿",
-  "Steel Guard 🩸🥷🏿",
-  "Moon Guard 🩸🥷🏿",
-  "Dragon Guard 🩸🥷🏿",
-  "Tiger Guard 🩸🥷🏿",
-  "Wind Guard 🩸🥷🏿",
-  "Storm Guard 🩸🥷🏿",
-  "Flame Guard 🩸🥷🏿",
-  "Water Guard 🩸🥷🏿",
-  "Frost Guard 🩸🥷🏿",
-  "Cloud Guard 🩸🥷🏿",
-  "Mist Guard 🩸🥷🏿",
-  "Shadow Guard 🩸🥷🏿",
-  "Phantom Guard 🩸🥷🏿",
-  "Dawn Guard 🩸🥷🏿",
-  "Dusk Guard 🩸🥷🏿",
-  "Heaven Guard 🩸🥷🏿",
-  "Spirit Guard 🩸🥷🏿",
-  "Noble Guard 🩸🥷🏿",
-  "Royal Guard 🩸🥷🏿",
-  "Samurai Focus 🩸🥷🏿",
-  "Warrior Focus 🩸🥷🏿",
-  "Shinobi Focus 🩸🥷🏿",
-  "Chakra Focus 🩸🥷🏿",
-  "Blade Focus 🩸🥷🏿",
-  "Sword Focus 🩸🥷🏿",
-  "Moon Focus 🩸🥷🏿",
-  "Dragon Focus 🩸🥷🏿",
-  "Tiger Focus 🩸🥷🏿",
-  "Silent Focus 🩸🥷🏿",
-  "Shadow Focus 🩸🥷🏿",
-  "Storm Focus 🩸🥷🏿",
-  "Wind Focus 🩸🥷🏿",
-  "Flame Focus 🩸🥷🏿",
-  "Water Focus 🩸🥷🏿",
-  "Iron Will 🩸🥷🏿",
-  "Steel Will 🩸🥷🏿",
-  "Samurai Will 🩸🥷🏿",
-  "Warrior Will 🩸🥷🏿",
-  "Shinobi Will 🩸🥷🏿",
-  "Silent Will 🩸🥷🏿",
-  "Dragon Will 🩸🥷🏿",
-  "Tiger Will 🩸🥷🏿",
-  "Moon Will 🩸🥷🏿",
-  "Storm Will 🩸🥷🏿",
-  "Wind Will 🩸🥷🏿",
-  "Flame Will 🩸🥷🏿",
-  "Water Will 🩸🥷🏿",
-  "Heaven Will 🩸🥷🏿",
-  "Spirit Will 🩸🥷🏿",
-  "Noble Will 🩸🥷🏿",
-  "Royal Will 🩸🥷🏿",
-  "Warrior Resolve 🩸🥷🏿",
-  "Samurai Resolve 🩸🥷🏿",
-  "Shinobi Resolve 🩸🥷🏿",
-  "Dragon Resolve 🩸🥷🏿",
-  "Tiger Resolve 🩸🥷🏿",
-  "Moon Resolve 🩸🥷🏿",
-  "Silent Resolve 🩸🥷🏿",
-  "Shadow Resolve 🩸🥷🏿",
-  "Storm Resolve 🩸🥷🏿",
-  "Wind Resolve 🩸🥷🏿",
-  "Flame Resolve 🩸🥷🏿",
-  "Water Resolve 🩸🥷🏿",
-  "Heaven Resolve 🩸🥷🏿",
-  "Spirit Resolve 🩸🥷🏿",
-  "Noble Resolve 🩸🥷🏿",
-  "Royal Resolve 🩸🥷🏿"
-];
-
-const NUMBER_INTERCEPT_RESPONSES = [
-  "🛑 Your numerical enumeration will not compensate for your lack of cognitive substance",
-  "📊 Keep counting all you want, your input remains mathematically irrelevant",
-  "💤 Sequential spamming won't elevate your abysmal standing in this discussion"
-];
-
-// File I/O Helpers
-function loadAllData() {
+function loadData() {
   try {
     if (fs.existsSync(DATA_PATH)) {
-      return JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
-    }
-  } catch (err) {
-    console.error("[BANAT-ENGINE] Load error:", err);
-  }
-  return {};
-}
-
-function saveAllData(data) {
-  try {
-    fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error("[BANAT-ENGINE] Save error:", err);
-  }
-}
-
-function getGroupConfig(threadID) {
-  const allData = loadAllData();
-  return allData[threadID] || { active: false, targetID: null, targetName: null, count: 0 };
-}
-
-function setGroupConfig(threadID, config) {
-  const allData = loadAllData();
-  allData[threadID] = config;
-  saveAllData(allData);
-}
-
-function isCountingOrNumberSpam(text) {
-  const clean = text.trim();
-  return /^\d+$/.test(clean) || /^#?\d+[\.\-\)]?$/.test(clean);
-}
-
-function getHumanSpeedDelay() {
-  return Math.floor(Math.random() * 1000) + 800;
-}
-
-function getSmartCounterReply(text) {
-  const lowerText = text.toLowerCase();
-  for (const item of CONTEXTUAL_RESPONSES) {
-    if (item.keywords.some((kw) => lowerText.includes(kw))) {
-      const randomIndex = Math.floor(Math.random() * item.replies.length);
-      return item.replies[randomIndex];
-    }
-  }
-  return null;
-}
-
-// FORMATTER NG RESIBO / COUNT TRACKER
-function formatReceipt(text, count, targetName) {
-  const dateStr = new Date().toLocaleTimeString("en-US", { timeZone: "Asia/Manila" });
-  return (
-    `🧾 [ RESIBO TRACKER #${count} ]\n` +
-    `👤 Target: ${targetName ? "@" + targetName : "Global"}\n` +
-    `⏰ Time: ${dateStr}\n` +
-    `💬 Message: ${text}\n\n` +
-    `—.GG/SLEEPIN4LGNG💫💤💤`
-  );
-}
-
-// 30-SECOND AUTO-COUNT TIMER ENGINE
-function startAutoCountTimer(api, threadID, targetID, targetName) {
-  stopAutoCountTimer(threadID);
-
-  // 30 Seconds Delay para sa Auto-Count
-  const timer = setTimeout(() => {
-    const config = getGroupConfig(threadID);
-    if (!config.active) return;
-
-    config.count = (config.count || 0) + 1;
-    setGroupConfig(threadID, config);
-
-    const tauntList = [
-      "30 seconds na nakalipas, tumigil ka na? ubos na ba stock ng utak mo?",
-      "30 seconds counting... bakit tumahimik ka na dyan? nagpatulong ka na ba sa mama mo?",
-      "30s stall! bilisan mo mag-type, halatang hirap ka na pumalag.",
-      "counting... hindi ka na makasagot sa resibo natin, balik ka na sa lobby."
-    ];
-
-    const chosenTaunt = tauntList[Math.floor(Math.random() * tauntList.length)];
-    const formattedMessage = formatReceipt(chosenTaunt, config.count, targetName);
-
-    let payload = formattedMessage;
-    if (targetID && targetName) {
-      payload = {
-        body: formattedMessage,
-        mentions: [{ id: targetID, tag: `@${targetName}` }]
-      };
-    }
-
-    api.sendMessage(payload, threadID, (err, info) => {
-      if (!err && info && info.messageID) {
-        api.setMessageReaction("💫", info.messageID, () => {}, true);
+      const parsed = JSON.parse(fs.readFileSync(DATA_PATH, "utf8"));
+      if (!parsed.roasts || parsed.roasts.length === 0) {
+        parsed.roasts = DEFAULT_SENO_LINES;
       }
-      // I-loop ulit ang 30-seconds auto-count hanggang sa sumagot ang target
-      startAutoCountTimer(api, threadID, targetID, targetName);
-    });
-  }, 30000); // 30000 ms = 30 seconds
-
-  autoCountTimers.set(threadID, timer);
+      if (!parsed.activeThreads) {
+        parsed.activeThreads = [];
+      }
+      return parsed;
+    }
+  } catch {}
+  return { activeThreads: [], roasts: DEFAULT_SENO_LINES };
 }
 
-function stopAutoCountTimer(threadID) {
-  if (autoCountTimers.has(threadID)) {
-    clearTimeout(autoCountTimers.get(threadID));
-    autoCountTimers.delete(threadID);
-  }
+function saveData(data) {
+  fs.writeFileSync(DATA_PATH, JSON.stringify(data, null, 2));
 }
+
+function isThreadActive(threadID) {
+  const data = loadData();
+  return Array.isArray(data.activeThreads) && data.activeThreads.includes(threadID.toString());
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function getRandomDelay(min = 3000, max = 4000) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+const lastResponseTime = new Map();
 
 // ===== EVENT HANDLER =====
 module.exports.handleEvent = async function ({ api, event }) {
-  if (!event || event.type !== "message" || !event.body) return;
+  const { threadID, senderID, body, messageID } = event;
 
-  const { threadID, messageID, senderID, body } = event;
-  const cleanBody = body.trim();
+  // Gagana lang kapag naka-ON sa GC na ito at hindi message ng bot
+  if (!isThreadActive(threadID) || senderID === api.getCurrentUserID()) return;
+
+  const cleanBody = (body || "").trim();
   const isSenderAdmin = ADMIN_IDS.includes(senderID.toString());
-
-  if (senderID === api.getCurrentUserID()) return;
-
   const isCommand = PREFIXES.some((p) => cleanBody.startsWith(p));
-
-  if (!isSenderAdmin && isCommand) {
-    if (userSpamTimers.has(senderID)) {
-      clearTimeout(userSpamTimers.get(senderID));
-      userSpamTimers.delete(senderID);
-    }
-    return;
-  }
 
   if (isSenderAdmin && isCommand) return;
 
-  const config = getGroupConfig(threadID);
-  if (!config.active) return;
+  const now = Date.now();
+  const lastTime = lastResponseTime.get(threadID) || 0;
+  const currentCooldown = getRandomDelay(3000, 4000);
 
-  if (config.targetID && senderID !== config.targetID) return;
+  if (now - lastTime < currentCooldown) return; 
 
-  // I-reset ang 30-second timer tuwing magse-send ng chat ang target
-  startAutoCountTimer(api, threadID, config.targetID, config.targetName);
+  lastResponseTime.set(threadID, now);
 
-  if (userSpamTimers.has(senderID)) {
-    clearTimeout(userSpamTimers.get(senderID));
+  try {
+    const data = loadData();
+    const roastsList = data.roasts && data.roasts.length > 0 ? data.roasts : DEFAULT_SENO_LINES;
+
+    const randomRoast = roastsList[Math.floor(Math.random() * roastsList.length)];
+
+    // 3 - 4 seconds delay bago mag-reply
+    const fastDelay = getRandomDelay(3000, 4000);
+    await sleep(fastDelay);
+
+    // Reply text message (WALANG EMOJI REACTION)
+    api.sendMessage(randomRoast, threadID, null, messageID);
+
+  } catch (error) {
+    console.error("Sinzu Engine Error:", error);
   }
-
-  const timer = setTimeout(async () => {
-    userSpamTimers.delete(senderID);
-
-    try {
-      config.count = (config.count || 0) + 1;
-      setGroupConfig(threadID, config);
-
-      let chosenText = getSmartCounterReply(cleanBody);
-
-      if (!chosenText) {
-        if (isCountingOrNumberSpam(cleanBody)) {
-          chosenText = NUMBER_INTERCEPT_RESPONSES[Math.floor(Math.random() * NUMBER_INTERCEPT_RESPONSES.length)];
-        } else {
-          chosenText = TRASHTALK_BANAT[Math.floor(Math.random() * TRASHTALK_BANAT.length)];
-        }
-      }
-
-      const formattedMessage = formatReceipt(chosenText, config.count, config.targetName);
-
-      let payload = formattedMessage;
-      if (config.targetID && config.targetName) {
-        payload = {
-          body: formattedMessage,
-          mentions: [{ id: config.targetID, tag: `@${config.targetName}` }]
-        };
-      }
-
-      api.sendMessage(payload, threadID, (err, info) => {
-        if (err) return console.error("[BANAT Send Error]:", err);
-
-        if (info && info.messageID) {
-          api.setMessageReaction("💫", info.messageID, (reactErr) => {
-            if (reactErr) console.error("[SLEEP-REACT Error]:", reactErr);
-          }, true);
-        }
-      }, messageID);
-
-    } catch (err) {
-      console.error("[BANAT-ENGINE Event Error]:", err);
-    }
-  }, getHumanSpeedDelay());
-
-  userSpamTimers.set(senderID, timer);
 };
 
-// ===== COMMAND RUN =====
+// ===== COMMAND HANDLER (ADMIN ONLY) =====
 module.exports.run = async function ({ api, event, args }) {
-  const { threadID, messageID, senderID, mentions } = event;
+  const { threadID, messageID, senderID } = event;
 
   if (!ADMIN_IDS.includes(senderID.toString())) {
-    return;
+    return api.sendMessage("⚠️ ADMIN ONLY: Walang kang permiso para gumamit ng command na ito.", threadID, messageID);
   }
 
-  const sub = (args[0] || "").toLowerCase().trim();
-  const config = getGroupConfig(threadID);
-
-  if (sub === "off") {
-    config.active = false;
-    config.targetID = null;
-    config.targetName = null;
-    config.count = 0;
-    setGroupConfig(threadID, config);
-    stopAutoCountTimer(threadID);
-
-    return api.sendMessage("—.GG/SLEEPIN4LGNG💫💤💤 [ OFF - COUNT RESET ]", threadID, messageID);
-  }
+  const sub = (args[0] || "").toLowerCase();
+  const data = loadData();
+  const tID = threadID.toString();
 
   if (sub === "on") {
-    const mentionedKeys = Object.keys(mentions || {});
-    config.active = true;
-    config.count = 0; // Reset count sa panibagong round
-
-    if (mentionedKeys.length > 0) {
-      const targetID = mentionedKeys[0];
-      const targetName = mentions[targetID].replace("@", "");
-      config.targetID = targetID;
-      config.targetName = targetName;
-      setGroupConfig(threadID, config);
-
-      startAutoCountTimer(api, threadID, targetID, targetName);
-
-      return api.sendMessage(
-        `—.GG/SLEEPIN4LGNG💫💤💤 BANAT & COUNT ACTIVATED\n\n` +
-        `🎯 Target: ${mentions[targetID]}\n` +
-        `🧾 Resibo Tracker: Enabled (#1 Start)\n` +
-        `⏱ Auto-Count Delay: 30 Seconds\n` +
-        `⚡ Response Speed: Fast Human Speed\n` +
-        `👑 Status: Running`,
-        threadID,
-        messageID
-      );
-    } else {
-      config.targetID = null;
-      config.targetName = null;
-      setGroupConfig(threadID, config);
-
-      startAutoCountTimer(api, threadID, null, null);
-
-      return api.sendMessage(
-        `—.GG/SLEEPIN4LGNG💫💤💤 GLOBAL BANAT & COUNT ACTIVATED\n\n` +
-        `🌐 Mode: Global (This GC)\n` +
-        `🧾 Resibo Tracker: Enabled (#1 Start)\n` +
-        `⏱ Auto-Count Delay: 30 Seconds\n` +
-        `⚡ Response Speed: Fast Human Speed\n` +
-        `👑 Status: Running`,
-        threadID,
-        messageID
-      );
+    if (!data.activeThreads.includes(tID)) {
+      data.activeThreads.push(tID);
+      saveData(data);
     }
+    return api.sendMessage("⚡ Sinzu Engine: ACTIVATED dito sa GC (3-4s Delay | No Auto React)", threadID, messageID);
+  }
+
+  if (sub === "off") {
+    data.activeThreads = data.activeThreads.filter((id) => id !== tID);
+    saveData(data);
+    return api.sendMessage("🛑 Sinzu Engine: DEACTIVATED dito sa GC", threadID, messageID);
+  }
+
+  if (sub === "status") {
+    const activeHere = isThreadActive(tID);
+    return api.sendMessage(
+      `📊 Engine Status (This GC): ${activeHere ? "ACTIVE ♾️" : "INACTIVE"}\n` +
+      `⏱️ Delay Speed: Fast (3s - 4s)\n` +
+      `🚫 Auto React: DISABLED\n` +
+      `📜 Total Seno Lines: ${(data.roasts || DEFAULT_SENO_LINES).length}`,
+      threadID,
+      messageID
+    );
+  }
+
+  if (sub === "add") {
+    const customLine = args.slice(1).join(" ");
+    if (!customLine) {
+      return api.sendMessage("❌ Paki-lagay ang line na idadagdag.", threadID, messageID);
+    }
+
+    if (!data.roasts) data.roasts = DEFAULT_SENO_LINES;
+    data.roasts.push(customLine);
+    saveData(data);
+
+    return api.sendMessage(`✅ Naidagdag sa lines:\n"${customLine}"`, threadID, messageID);
+  }
+
+  if (sub === "listlines") {
+    const list = data.roasts || DEFAULT_SENO_LINES;
+    let msg = `📜 Seno Lines (${list.length}):\n\n`;
+    list.slice(0, 50).forEach((line, index) => {
+      msg += `${index + 1}. ${line}\n`;
+    });
+    if (list.length > 50) {
+      msg += `\n...at may ${list.length - 50} pang lines.`;
+    }
+    return api.sendMessage(msg, threadID, messageID);
   }
 
   return api.sendMessage(
-    `👑 SLEEPIN4LGNG BANAT ENGINE\n\n` +
-    `• /banat on\n` +
-    `• /banat on @mention\n` +
-    `• /banat off`,
+    "Sinzu Admin Commands:\n" +
+    "/sinzu on — Paandarin sa GC na ito\n" +
+    "/sinzu off — Patayin sa GC na ito\n" +
+    "/sinzu status — Tingnan ang status\n" +
+    "/sinzu add <text> — Magdagdag ng line\n" +
+    "/sinzu listlines — Tingnan ang mga lines",
     threadID,
     messageID
   );
